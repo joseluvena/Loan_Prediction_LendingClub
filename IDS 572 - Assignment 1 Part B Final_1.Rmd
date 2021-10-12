@@ -1,0 +1,747 @@
+---
+title: "IDS 572 - Assignment 1 Part B_Draft"
+author: "Joseline Tanujaya, Sweta Bansal, Vibhanshu"
+date: "2/15/2021"
+output: html_document
+---
+```{r include=FALSE}
+
+library(tidyverse)
+library(lubridate)
+
+```
+
+
+```{r message=FALSE, include=FALSE}
+
+lcdf <- read_csv('lcDataSample5m.csv')
+lcdf <- lcdf %>% filter(loan_status == "Fully Paid" | loan_status == "Charged Off")
+```
+
+```{r}
+#Term of the loan is the duration between the last-payment-date and the loan issue-date.
+# check the format of these two columns with date values
+head(lcdf[, c("last_pymnt_d", "issue_d")])
+
+# change the character type to date:
+lcdf$last_pymnt_d<-paste(lcdf$last_pymnt_d, "-01", sep = "")
+# convert this character to a date type variable
+lcdf$last_pymnt_d<-parse_date_time(lcdf$last_pymnt_d,  "myd")
+
+# for defaulted loans, set the actual-term at 3 years.
+lcdf$actualTerm <- ifelse(lcdf$loan_status=="Fully Paid", as.duration(lcdf$issue_d  %--% lcdf$last_pymnt_d)/dyears(1), 3)
+
+#Based on actual term, the actual annual return is
+lcdf$actualReturn <- ifelse(lcdf$actualTerm>0, ((lcdf$total_pymnt -lcdf$funded_amnt)/lcdf$funded_amnt)*(1/lcdf$actualTerm), 0)
+
+lcdf$annRet <- ((lcdf$total_pymnt -lcdf$funded_amnt)/lcdf$funded_amnt)*(12/36)*100
+
+```
+
+
+```{r}
+#DERIVED ATTRIBUTE
+
+#Derived attribute 1: proportion of satisfactory bankcard accounts 
+lcdf$propSatisBankcardAccts <- ifelse(lcdf$num_bc_tl>0, lcdf$num_bc_sats/lcdf$num_bc_tl, 0)
+
+#Derived attribute 2: the length of borrower's history with LC: REMOVED BCS DERIVED FROM LEAKAGE DATA (issue_d)
+#lcdf$earliest_cr_line<-paste(lcdf$earliest_cr_line, "-01", sep = "")
+#lcdf$earliest_cr_line<-parse_date_time(lcdf$earliest_cr_line, "myd")
+ 
+#lcdf$borrHistory <- as.duration(lcdf$earliest_cr_line %--% lcdf$issue_d) / dyears(1)
+
+#Derived attribute 3: ratio of openAccounts to totalAccounts
+lcdf$prop_OpAccts_to_TotAccts <- ifelse(lcdf$open_acc >0, lcdf$open_acc/lcdf$total_acc, 0)
+
+#Derived attribute 4: ratio of loan amount to annual income
+lcdf$propLoanAmt_to_AnnInc <- lcdf$loan_amnt/lcdf$annual_inc
+
+#Derived attribute 5: ratio of total current balance to annual income: REMOVED BCS DERIVED FROM LEAKAGE DATA (tot_cur_bal)
+#lcdf$prop_CurBal_to_AnnIc <- lcdf$tot_cur_bal/lcdf$annual_inc
+```
+
+```{r}
+#NA Removal
+#drop variables with all NAs:
+lcdf <- lcdf %>% select_if(function(x){!all(is.na(x))})
+
+#remove variables which have more than 60% missing values, because the data available is insufficient to predict missing values.
+nm<-names(lcdf)[colMeans(is.na(lcdf))>0.6]
+lcdf <- lcdf %>% select(-nm)
+
+lcdf<- lcdf %>% replace_na(list(mths_since_last_delinq=500, bc_open_to_buy=mean(lcdf$bc_open_to_buy, na.rm=TRUE),  last_credit_pull_d='01-01-2015', mo_sin_old_il_acct=1000, mths_since_recent_bc=1000, mths_since_recent_inq=50, bc_util=median(lcdf$bc_util, na.rm=TRUE), num_tl_120dpd_2m = median(lcdf$num_tl_120dpd_2m, na.rm=TRUE),percent_bc_gt_75 = median(lcdf$percent_bc_gt_75, na.rm=TRUE), revol_util = median(lcdf$revol_util, na.rm = TRUE), emp_length= "< 1 year"))
+
+colMeans(is.na(lcdf))[colMeans(is.na(lcdf))>0]
+```
+
+
+```{r}
+#DATA LEAKAGE
+#Drop some other variables
+varsToRemove <- c("X1",
+                  "funded_amnt",
+                  "funded_amnt_inv",
+                  "term",
+                  "emp_title",
+                  "issue_d",
+                  "delinq_2yrs",
+                  "pymnt_plan",
+                  "title",
+                  "zip_code",
+                  "addr_state",
+                  "delinq_2yrs",
+                  "inq_last_6mths", 
+                  "mths_since_last_delinq",
+                  "open_acc",
+                  "pub_rec",
+                  "revol_bal",
+                  "revol_util",
+                  "total_acc",
+                  "out_prncp",
+                  "out_prncp_inv",
+                  "total_pymnt_inv",
+                  "total_rec_prncp",
+                  "total_rec_int",
+                  "total_rec_late_fee",
+                  "recoveries",
+                  "collection_recovery_fee",
+                  "last_pymnt_d",
+                  "last_pymnt_amnt",
+                  "last_credit_pull_d",
+                  "policy_code",
+                  "application_type",
+                  "acc_now_delinq",
+                  "tot_coll_amt",
+                  "tot_cur_bal",
+                  "hardship_flag",
+                  "disbursement_method",
+                  "debt_settlement_flag",
+                  "earliest_cr_line",
+                  "num_tl_op_past_12m",
+                  "percent_bc_gt_75",
+                  "verification_status",
+                  "num_rev_tl_bal_gt_0",
+                  "num_actv_rev_tl",
+                  "num_actv_bc_tl",
+                  "pub_rec_bankruptcies",
+                  "num_accts_ever_120_pd",
+                  "collections_12_mths_ex_med",
+                  "num_tl_90g_dpd_24m",
+                  "num_tl_120dpd_2m"
+)
+lcdf <- lcdf %>% select(-varsToRemove)
+
+
+```
+
+```{r}
+#change chr to factors:
+lcdf$grade <- factor(lcdf$grade, levels=c("A", "B","C","D", "E","F","G"))
+
+lcdf$sub_grade <- factor(lcdf$sub_grade, levels=c("A1", "A2", "A3", "A4", "A5", "B1", "B2", "B3", "B4", "B5", "C1", "C2", "C3", "C4", "C5", "D1", "D2", "D3", "D4", "D5", "E1", "E2", "E3", "E4", "E5", "F1", "F2", "F3", "F4", "F5", "G1", "G2", "G3", "G4", "G5"))
+
+#lcdf$verification_status <- as.factor(lcdf$verification_status)
+
+lcdf$initial_list_status <- factor(lcdf$initial_list_status, levels=c("w", "f"))
+
+lcdf$loan_status <- factor(lcdf$loan_status, levels=c("Fully Paid", "Charged Off"))
+
+lcdf$emp_length <- factor(lcdf$emp_length, levels=c("n/a", "< 1 year","1 year","2 years", "3 years" ,  "4 years",   "5 years",   "6 years",   "7 years" ,  "8 years", "9 years", "10+ years" ))
+
+lcdf$purpose <- fct_recode(lcdf$purpose, other="wedding", other="educational", other="renewable_energy")
+
+lcdf$home_ownership <- as.factor((lcdf$home_ownership))
+
+```
+
+
+# Q5
+
+Develop decision tree models to predict default.(a) Split the data into training and validation sets. What proportions do you consider, why? (b) Train decision tree models (use both rpart, c50)
+[If something looks too good, it may be due to leakage – make sure you address this] What parameters do you experiment with, and what performance do you obtain (on training and validation sets)? Clearly tabulate your results and briefly describe your findings.
+How do you evaluate performance – which measure do you consider, and why? (c) Identify the best tree model. Why do you consider it best? Describe this model – in terms of complexity (size). Examine variable importance. Briefly describe how variable importance is obtained in your best model.
+
+
+Q5 Analysis:
+Typically the proportion of Train to Test is around 80%-20% to 70%-30%. We are giving more data to Train set because it is required to make the classification model better. We set apart 30% for Testing, because our dataset is big enough (more than 80,000 rows), therefore 70% is enough to build the model.
+
+```{r}
+#split the data into trn, tst subsets
+nr=nrow(lcdf)
+trnIndex = sample(1:nr, size = round(0.7*nr), replace=FALSE)
+lcdfTrn=lcdf[trnIndex,]
+lcdfTst = lcdf[-trnIndex,]
+
+dim(lcdfTrn)
+dim(lcdfTst)
+```
+
+Build Decision Tree using rpart
+
+```{r}
+library(rpart)
+library(ROCR)
+library(pROC)
+
+#Set prior to 0.5 - 0.5: decreasing xerror pattern as expected in the CP table, but low accuracy.
+rpDT1 <- rpart(loan_status ~., data=subset(lcdfTrn, select=-c(annRet, actualTerm, actualReturn, total_pymnt)), method="class", parms = list(split = "information", prior=c(0.5,0.5)), control = rpart.control(minsplit = 30, cp=0.00))
+
+rpDT1<-prune(rpDT1,cp=0.00022)
+printcp(rpDT1)
+
+#confusion matrix on training data
+table(pred=predict(rpDT1,lcdfTrn, type="class"), true=lcdfTrn$loan_status)
+
+predTrn1=predict(rpDT1,lcdfTrn, type="class")
+mean(predTrn1 == lcdfTrn$loan_status)
+
+#confusion matrix on test data
+table(pred=predict(rpDT1,lcdfTst, type="class"), true=lcdfTst$loan_status)
+
+predTst1=predict(rpDT1, lcdfTst, type='class')
+mean(predTst1 == lcdfTst$loan_status)
+
+rpDT1$variable.importance
+write.csv(rpDT1$variable.importance,"output_rpart_var_importance.csv")
+
+#Set prior according to the class proportions. Increasing xerror, but higher accuracy.
+rpDT2 <- rpart(loan_status ~., data=subset(lcdfTrn, select=-c(annRet, actualTerm, actualReturn, total_pymnt)), method="class", parms = list(split = "information", prior=c(1-0.171,0.171)), control = rpart.control(minsplit = 30, cp=0.00))
+
+#prior=c(0.5,0.5)),
+rpDT2<-prune(rpDT2,cp=0.0002)
+printcp(rpDT2)
+
+#confusion matrix on training data
+table(pred=predict(rpDT2,lcdfTrn, type="class"), true=lcdfTrn$loan_status)
+
+predTrn2=predict(rpDT2,lcdfTrn, type="class")
+mean(predTrn2 == lcdfTrn$loan_status)
+
+#confusion matrix on test data
+table(pred=predict(rpDT2,lcdfTst, type="class"), true=lcdfTst$loan_status)
+
+predTst2=predict(rpDT2, lcdfTst, type='class')
+mean(predTst2 == lcdfTst$loan_status)
+
+rpDT2$variable.importance
+#write.csv(rpDT2$variable.importance,"output_rpart_var_importance.csv")
+
+#AUC ROC rpDT2
+#On Train Data
+predTrnProb_rpDT2=predict(rpDT2, lcdfTrn, type='prob')
+predTrnProb_rpDT2_FP <- predTrnProb_rpDT2[, 'Fully Paid']
+
+auc_rpDT2_Trn <- auc(lcdfTrn$loan_status, predTrnProb_rpDT2_FP)
+auc_rpDT2_Trn
+rpDT2_roc_Trn = roc(lcdfTrn$loan_status, predTrnProb_rpDT2_FP)
+plot(rpDT2_roc_Trn)
+
+#On Test Data
+predTstProb_rpDT2=predict(rpDT2, lcdfTst, type='prob')
+predTstProb_rpDT2_FP <- predTstProb_rpDT2[, 'Fully Paid']
+
+auc_rpDT2_Tst <- auc(lcdfTst$loan_status, predTstProb_rpDT2_FP)
+auc_rpDT2_Tst
+
+rpDT2_roc_Tst = roc(lcdfTst$loan_status, predTstProb_rpDT2_FP)
+plot(rpDT2_roc_Tst)
+
+```
+
+Build Decision Tree using C50
+
+```{r}
+library(C50)
+library(rpart)
+library(tidyverse)
+library(lubridate)
+library(caret)
+
+#upsample "Charged Off" in lcdfTrn
+up_lcdfTrn <- upSample(x = lcdfTrn[, -ncol(lcdfTrn)], y = lcdfTrn$loan_status) %>% select(-c("Class"))
+table(up_lcdfTrn$loan_status) 
+
+up_lcdfTst <- upSample(x = lcdfTst[, -ncol(lcdfTst)], y = lcdfTst$loan_status) %>% select(-c("Class"))
+table(up_lcdfTst$loan_status) 
+
+c5_DT1 <- C5.0(as.factor(up_lcdfTrn$loan_status) ~ ., data=subset(up_lcdfTrn, select=-c(annRet, actualTerm, actualReturn, total_pymnt)), method = "class", control = C5.0Control(minCases = 80))
+summary(c5_DT1)
+
+
+print(C5imp(c5_DT1))
+#temp<-C5imp(c5_DT1)
+#write.csv(temp,"output_c50_var_importance.csv")
+#plot(c5_DT1)
+
+
+predTrnC5<-predict(c5_DT1,lcdfTrn, type='class')
+table( predTrnC5, true=lcdfTrn$loan_status)
+mean(predTrnC5 == lcdfTrn$loan_status)
+table(pred = predict(c5_DT1,lcdfTst, type='class'), true=lcdfTst$loan_status)
+mean(predict(c5_DT1,lcdfTst, type='class') ==lcdfTst$loan_status)
+
+#ROC AUC
+#On Train Data
+predTrnProb_c5=predict(c5_DT1, lcdfTrn, type='prob')
+predTrnProb_c5_FP <- predTrnProb_c5[, 'Fully Paid']
+
+auc_c5_Trn <- auc(lcdfTrn$loan_status, predTrnProb_c5_FP)
+c5_roc_Trn <- roc(lcdfTrn$loan_status, predTrnProb_c5_FP)
+plot(c5_roc_Trn)
+
+#On Test Data
+predTstProb_c5=predict(c5_DT1, lcdfTst, type='prob')
+predTstProb_c5_FP <- predTstProb_c5[, 'Fully Paid']
+
+auc_c5_Tst <- auc(lcdfTst$loan_status, predTstProb_c5_FP)
+c5_roc_Tst <- roc(lcdfTst$loan_status, predTstProb_c5_FP) 
+plot(c5_roc_Tst)
+
+```
+
+
+6. Develop a random forest model. (Note the ‘ranger’ library can give faster computations) What parameters do you experiment with, and does this affect performance? Describe the best model in terms of number of trees, performance, variable importance. Compare the random forest and best decision tree model from Q 4 above. Do you find the
+importance of variables to be different? Which model would you prefer, and why? For evaluation of models, you should include confusion matrix related measures, as well as ROC analyses and lifts. Explain which performance measures you focus on, and why.
+
+
+
+
+
+Tree parameters: 
+- num of trees should be 10 x num of variables,
+- mtry by default in ranger is sqrt of p, but bcs we have noisy predictors, we will set a higher mtry. We declare our data "noisy" because of the relatively low average AUC scores. No variable scored higher than 70% in AUC score.
+- tree tuning parameters: we should build less complex tree, because we are keeping higher values of mtry (our data has many noisy predictors). What we are doing: limit the tree depth, bigger node size, etc.
+- To maintain low correlation between trees, we will set a lower sample.fraction. The default is 1, so we will set it to a fraction lower than 1.
+- respect.unordered.factors set to TRUE for better results.
+- replace = TRUE, to generate proper bootstrap samples.
+- set seed to create reproducible results.
+
+https://bradleyboehmke.github.io/HOML/random-forest.html
+
+
+```{r}
+library(dplyr)
+library(ggraph)
+library(igraph)
+library(randomForest)
+library(caret)
+#library("xlsx")
+library(ranger)
+
+rgModel1 <- ranger(loan_status ~., data=subset(up_lcdfTrn, select=-c(annRet, actualTerm, actualReturn, total_pymnt)), num.trees =200, importance='permutation', mtry = 7, max.depth = 10, min.node.size = 30, sample.fraction = 0.5, replace=FALSE, respect.unordered.factors = "order" , verbose = TRUE , seed=0)
+
+#Summary()
+
+
+vimpRg_1 <- ranger::importance(rgModel1)
+write.csv(vimpRg_1,"output_Ranger_var_importance.csv")
+
+#write.xlsx(vimpRg_1, file, sheetName = "Sheet1", 
+#  col.names = TRUE, row.names = TRUE, append = FALSE)
+
+#scoreTst <- predict(rgModel1,lcdfTst)
+#head(scoreTst)$predictions
+
+#scoreTst <- scoreTst$predictions[,"Fully Paid"]
+#Predict model using training data
+predTrn<- predict(rgModel1,up_lcdfTrn)
+predTst<- predict(rgModel1,up_lcdfTst)
+
+#create confusion matrix for Training data
+Conf_Trn<-table(predictions(predTrn), up_lcdfTrn$loan_status)
+confusionMatrix(Conf_Trn,positive = "Charged Off")
+
+#create confusion matrix for Test data
+Conf_Tst<-table(predictions(predTst), up_lcdfTst$loan_status)
+confusionMatrix(Conf_Tst,positive = "Charged Off")
+
+
+rgModelProb <- ranger(loan_status ~., data=subset(lcdfTrn, select=-c(annRet, actualTerm, actualReturn, total_pymnt)),
+num.trees =200, importance='permutation', mtry = 7, max.depth = 10, min.node.size = 30, sample.fraction = 0.5, replace=FALSE, respect.unordered.factors = "order" , verbose = TRUE , seed=0, probability = TRUE)
+
+scoreTrn <- predict(rgModelProb,lcdfTrn)
+head(scoreTrn)$predictions
+
+scoreTrn_FP <- scoreTrn$predictions[,"Fully Paid"]
+vimpRg_1 <- ranger::importance(rgModelProb)
+vimpRg_1 
+
+#evaluate AUC and ROC
+library(pROC)
+auc_rg_Trn <- auc(lcdfTrn$loan_status, scoreTrn_FP)
+rg_roc_Trn <- roc(lcdfTrn$loan_status, scoreTrn_FP)
+plot(rg_roc_Trn)
+
+#Test data ROC AUC
+scoreTst <- predict(rgModelProb,lcdfTst)
+head(scoreTst)$predictions
+
+scoreTst_FP <- scoreTst$predictions[,"Fully Paid"]
+
+#evaluate AUC and ROC
+auc_rg_Tst <- auc(lcdfTst$loan_status, scoreTst_FP)
+rg_roc_Tst <- roc(lcdfTst$loan_status, scoreTst_FP)
+plot(rg_roc_Tst)
+
+
+```
+
+
+```{r}
+#now apply the prediction function from ROCR to get a prediction object
+library(ROCR)
+rocPredTst <- prediction(scoreTst_FP, lcdfTst$loan_status, label.ordering = c('Charged Off','Fully Paid'))
+
+liftPerf <-performance(rocPredTst, "lift", "rpp")
+plot(liftPerf)
+
+```
+
+
+
+
+
+
+Q7 Analysis:
+This part of the assignment seems like a natural extension to question 2(V). Some aspect of the questions have been answered in 2(V). For the sake of completion we have decided to repeat our previous analysis for the purpose of providing reader a exhaustive report. We have previously calculated/received several factors such as interest rate, average interest rate, average return rate.
+
+Interest rate cannot be direct indicator of profit because we also have to consider the amount we investor has put in to earn the money. Using the well known formula for profit:
+Profit= Revenue - Cost
+
+total payment based on Interest rate basically present the overall revenue from which we need to get rid of Cost price which in this case in funded amount. We get actual return using the mentioned method which we divide by duration to achieve the annual return aka actual interest rate to achieve the annual return.
+
+
+In the table below we have presented an average estimate about how the return looks like in 3 year. we have considered the fact that average duration for paid off loans is not 3 years but averages around 2.1 year. We have added 2 % certificate of deposit rate which is the risk free rate. 3 year rate is averaging around 8% and even reaches up to 10% for most profitable business.
+
+Further to that we have chosen our best models that we created using rpart,ranger and c50 strategy and tried to come up with investment strategy about investing 100usd. we allocated weights to all 4 possible scenarios in confusion matrix and processed our 100 dollars through all the different models for different sets of thresholds. we have presented our findings and different set of confusion matrix in the appendix section.
+
+
+It turns out all of our models irrespective of the threshold are giving better profit than the risk free rate of 2% per annum.
+
+
+
+```{r}
+
+
+
+lcdf %>% group_by(grade) %>% tally()
+lcdf %>% group_by(grade) %>% summarise(mean(loan_amnt))
+
+lcdf %>% group_by(loan_status, grade) %>% tally()
+
+
+lcdf %>% group_by(grade) %>% summarise(nLoans=n(), defaults=sum(loan_status=="Charged Off"),
+avgInterest= mean(int_rate), stdInterest=sd(int_rate), avgLoanAMt=mean(loan_amnt), avgPmnt=mean(total_pymnt))
+
+
+
+lcdf %>% group_by(grade) %>% summarise(nLoans=n(), defaults=sum(loan_status=="Charged Off"), avgInterest= mean(int_rate),
+stdInterest=sd(int_rate), avgLoanAMt=mean(loan_amnt), avgPmnt=mean(total_pymnt), avgRet=mean(annRet), stdRet=sd(annRet),
+minRet=min(annRet), maxRet=max(annRet))
+
+
+
+lcdf %>% select(loan_status, loan_amnt, total_pymnt, int_rate, actualTerm, actualReturn ) %>% view()
+
+
+#Summaries
+
+lcdf %>% group_by(loan_status) %>% summarise(nLoans=n(), avgInterest= mean(int_rate), avgLoanAmt=mean(loan_amnt), avgRet=mean(annRet),
+avgActualRet=mean(actualReturn), avgActualTerm=mean(actualTerm), minActualRet=min(actualReturn), maxActualRet=max(actualReturn))
+
+
+#)Loans – performance by grade ?
+
+
+lcdf %>% group_by(grade) %>% summarise(nLoans=n(), defaults=sum(loan_status=="Charged Off"), defaultRate=defaults/nLoans,
+avgInterest= mean(int_rate), avgLoanAmt=mean(loan_amnt), avgRet=mean(annRet), avgActualRet=mean(actualReturn)*100,
+avgActualTerm=mean(actualTerm), minActualRet=min(actualReturn)*100, maxActualRet=max(actualReturn)*100)
+
+
+
+
+
+lcdf %>% group_by(grade, loan_status) %>% summarise(nLoans=n(), defaults=sum(loan_status=="Charged Off"), defaultRate=defaults/nLoans,
+avgInterest= mean(int_rate), avgLoanAmt=mean(loan_amnt), avgRet=mean(annRet), avgActualRet=mean(actualReturn),
+avgActualTerm=mean(actualTerm), minActualRet=min(actualReturn), maxActualRet=max(actualReturn))
+
+
+
+#Cost based performance – what cost/profit values to use?
+
+lcdf %>% group_by(loan_status) %>% summarise(avgInt=mean(int_rate),avgActInt = mean(actualReturn*100))
+
+
+#final table for the purpose of analysis
+
+lcdf %>% group_by(grade,loan_status) %>% summarise(count=n(),avgInt=mean(int_rate),avgActInt = mean(actualReturn*100),avgActualTerm=mean(actualTerm),avgRet=mean(annRet))
+
+
+lcdf %>% group_by(grade) %>% summarise(count=n(),avgInt=mean(int_rate),avgActInt = mean(actualReturn*100),avgActualTerm=mean(actualTerm),avgRet=mean(annRet),default_rate=sum(loan_status=="Charged Off")/n()*100, ThreeYearRet=(mean(annRet)*3+(3-mean(actualTerm))*2))
+
+
+
+
+```
+
+
+
+
+
+
+```{r}
+
+
+#Ranger Evaluation
+
+prPerfRF <- data.frame(scoreTst_FP)
+prRetPerfRF <- cbind(prPerfRF, status=lcdfTst$loan_status, grade=lcdfTst$grade, actRet=lcdfTst$actualReturn, actTerm = lcdfTst$actualTerm)
+prRetPerfRF <- prRetPerfRF %>% mutate(decile = ntile(-scoreTst_FP, 10))
+prRetPerfRF %>% group_by(decile) %>% summarise(count=n(), numDefaults=sum(status=="Charged Off"), avgActRet=mean(actRet),
+minRet=min(actRet), maxRet=max(actRet), avgTer=mean(actTerm), totA=sum(grade=="A"), totB=sum(grade=="B" ), totC=sum(grade=="C"),
+totD=sum(grade=="D"), totE=sum(grade=="E"), totF=sum(grade=="F") )
+
+
+
+prRetPerfRF %>% group_by(decile) %>% summarise(count=n(), numDefaults=sum(status=="Charged Off"),goodloan=n()-sum(status=="Charged Off"), avgActRet=mean(actRet), riskfreerate=0.02, 
+avgTer=mean(actTerm),
+NetMoneyLCon100USD=  mean(actRet)* mean(actTerm)*100 + (3-mean(actTerm))*0.02*100,
+NetMoneyCDon100USD=  0.02*3*100)
+
+
+```
+
+
+```{r}
+#Use test dataset on all
+#Profit Evaluation based on rpDT
+rpTHRESH=0.3
+predTrnProb=predict(rpDT2, lcdfTrn, type='prob')
+predTstProb=predict(rpDT2, lcdfTst, type='prob')
+
+# Confusion table
+predTrnRP = ifelse(predTrnProb[, 'Charged Off'] >= rpTHRESH, 'Charged Off', 'Fully Paid')
+table( pred = predTrnRP, true=lcdfTrn$loan_status)
+
+predTstRP = ifelse(predTstProb[, 'Charged Off'] >= rpTHRESH, 'Charged Off', 'Fully Paid')
+table( pred = predTstRP, true=lcdfTst$loan_status)
+
+#Profit Evaluation based on C5.0
+CTHRESH=0.8
+predTrnProbC5=predict(c5_DT1, lcdfTrn, type='prob')
+predTstProbC5=predict(c5_DT1, lcdfTst, type='prob')
+
+# Confusion table
+predTrnC5 = ifelse(predTrnProbC5[, 'Charged Off'] >= CTHRESH, 'Charged Off', 'Fully Paid')
+table( pred = predTrnC5, true=lcdfTrn$loan_status)
+
+predTstC5 = ifelse(predTstProbC5[, 'Charged Off'] >= CTHRESH, 'Charged Off', 'Fully Paid')
+table( pred = predTstC5, true=lcdfTst$loan_status)
+
+#Profit Evaluation based on ranger
+rgTHRESH=0.3
+predTrnProbRG=predict(rgModelProb, lcdfTrn)
+predTstProbRG=predict(rgModelProb, lcdfTst)
+
+# Confusion table
+predTrnRG = ifelse(predTrnProbRG$predictions[, 'Charged Off'] >= rgTHRESH, 'Charged Off', 'Fully Paid')
+table( pred = predTrnRG, true=lcdfTrn$loan_status)
+
+lcdf %>% group_by(loan_status) %>% summarise(intRate = mean(int_rate), actTerm = mean(actualTerm), actRet = mean(actualReturn))
+
+
+predTstRG = ifelse(predTstProbRG$predictions[, 'Charged Off'] >= rgTHRESH, 'Charged Off', 'Fully Paid')
+table( pred = predTstRG, true=lcdfTst$loan_status)
+
+lcdf %>% group_by(loan_status) %>% summarise(intRate = mean(int_rate), actTerm = mean(actualTerm), actRet = mean(actualReturn))
+
+
+PROFITVAL <- 100*(0.0803*2.1+0.02*0.9)  #profit (on $100) from accurately identifying Fully_paid loans: 16.7827
+COSTVAL <- 100*-0.117*3 # loss (on $100) from incorrectly predicting a Charged_Off loan as Full_paid: -35.1
+
+prPerfRF <- cbind(prPerfRF, status=lcdfTst$loan_status)
+prPerfRF <- prPerfRF[order(-scoreTst_FP) ,] #sort in desc order of prob(fully_paid)
+#prPerfRF <- prPerfRF[ ,order(scoreTst_FP)] #sort in desc order of prob(fully_paid)
+
+
+#typeof(prPerfRF)
+#dim(prPerfRF)
+#prPerfRF[1,]
+#row_number(prPerfRF)
+prPerfRF$profit <- ifelse(prPerfRF$status == 'Fully Paid', PROFITVAL, COSTVAL)
+prPerfRF$cumProfit <- cumsum(prPerfRF$profit)
+max(prPerfRF$cumProfit)
+prPerfRF$cumProfit[which.max(prPerfRF$cumProfit)]
+plot(prPerfRF$cumProfit)
+scoreTst_FP_Limit1=prPerfRF$scoreTst_FP[prPerfRF$cumProfit==max(prPerfRF$cumProfit)]
+scoreTst_FP_Limit1
+
+prPerfRF$cumilaive_count <-seq.int(nrow(prPerfRF))
+prPerfRF$AvgCumProfit=prPerfRF$cumProfit/prPerfRF$cumilaive_count
+max(prPerfRF$AvgCumProfit)
+scoreTst_FP_Limit2=prPerfRF$scoreTst_FP[prPerfRF$AvgCumProfit==max(prPerfRF$AvgCumProfit)]
+scoreTst_FP_Limit2
+plot(prPerfRF$AvgCumProfit)
+
+
+
+prPerfRF$cumilaive_count_reverse <- nrow(prPerfRF)- seq.int(nrow(prPerfRF))
+prPerfRF
+sum(prPerfRF$profit)
+prPerfRF$cumprofit_reverse= sum(prPerfRF$profit)-prPerfRF$cumProfit
+prPerfRF$Avgcumprofit_reverse= prPerfRF$cumprofit_reverse/prPerfRF$cumilaive_count_reverse
+scoreTst_FP_Limit3<-prPerfRF$scoreTst_FP[prPerfRF$Avgcumprofit_reverse<6]
+length(scoreTst_FP_Limit3)
+scoreTst_FP_Limit3[1]
+plot(prPerfRF$Avgcumprofit_reverse)
+
+  
+
+
+
+
+```
+
+```{r}
+library(xgboost)
+library(caret)
+
+#Needs all data to be numeric -- so we convert categorical (i.e. factor) variables - # use the dummyVars function in the 'caret' package to convert factor variables to dummy-variables
+
+dumVar<-dummyVars(~.,data=lcdf %>% select(-loan_status))
+dxlcdf<- predict(dumVar,lcdf)
+
+# for loan_status, check levels and convert to dummy vars and keep the class label of interest
+levels(lcdf$loan_status)
+dylcdf <- class2ind(lcdf$loan_status, drop2nd = FALSE)
+# and then decide which one to keep
+colcdf <- dylcdf [ , 1]# or,fplcdf <- dycldf [ , 2]  
+
+#Training, test subsets
+dxlcdfTrn <- dxlcdf[trnIndex,]
+colcdfTrn <- colcdf[trnIndex]
+dxlcdfTst <- dxlcdf[-trnIndex,]
+colcdfTst <- colcdf[-trnIndex]
+dxTrn <- xgb.DMatrix(subset(dxlcdfTrn, select=-c(annRet, actualTerm, actualReturn, total_pymnt)), label=colcdfTrn)
+dxTst <- xgb.DMatrix( subset( dxlcdfTst,select=-c(annRet, actualTerm, actualReturn, total_pymnt)), label=colcdfTst)
+
+xgbWatchlist <- list(train = dxTrn, eval = dxTst)
+#we can watch the progress of learning thru performance on these datasets
+#list of parameters for the xgboost model development functions
+xgbMyParam <- list (
+max_depth = 4, eta = 0.01,
+objective = "binary:logistic",
+eval_metric="error", eval_metric = "auc")
+#can specify which evaluation metrics we want to watch
+xgb_lsM1 <- xgb.train( xgbMyParam, dxTrn, nrounds = 10, early_stopping_rounds = 10,
+xgbWatchlist) #Stop if performance does not improve after 10 rounds
+
+xgb_lsM1$best_iteration
+xpredTrg<-predict(xgb_lsM1, dxTrn)
+head(xpredTrg)
+
+#confusion matrix
+table(pred=as.numeric(xpredTrg>0.5), act=colcdfTrn)
+
+#ROC, AUC performance
+xpredTst<-predict(xgb_lsM1, dxTst)
+pred_xgb_lsM1=prediction(xpredTst, lcdfTst$loan_status,label.ordering = c("Charged Off", "Fully Paid"))
+aucPerf_xgb_lsM1=performance(pred_xgb_lsM1, "tpr", "fpr")
+plot(aucPerf_xgb_lsM1)
+abline(a=0, b= 1)
+
+#use cross-validation on training dataset to determine best model
+xgbParam <- list (
+max_depth = 4, eta = 0.01,
+objective = "binary:logistic",
+eval_metric="error", eval_metric = "auc")
+xgb_lscv <- xgb.cv( xgbParam, dxTrn, nrounds = 10, nfold=10, early_stopping_rounds = 10 )
+#best iteration
+xgb_lscv$best_iteration
+# or for the best iteration based on performance measure (among those specified in xgbParam)
+best_cvIter <- which.max(xgb_lscv$evaluation_log$test_auc_mean)
+
+#best model
+xgb_lsbest <- xgb.train(xgbParam, dxTrn, nrounds = xgb_lscv$best_iteration)
+#variable importance
+#xgb.importance(model = xgb_lsbest) %>% view()
+
+xgb_lscv$evaluation_log
+
+xpredBestTrg<-predict(xgb_lsbest, dxTrn)
+head(xpredBestTrg)
+
+
+#confusion matrix
+xpredBestTrn<-predict(xgb_lsbest, dxTrn)
+head(xpredBestTrn)
+table(pred=as.numeric(xpredBestTrn>0.8), act=colcdfTrn)
+
+xpredBestTst<-predict(xgb_lsbest, dxTst)
+head(xpredBestTrn)
+table(pred=as.numeric(xpredBestTrn>0.8), act=colcdfTrn)
+
+
+#confusion matrix
+table(pred=as.numeric(xpredBestTst>0.8), act=colcdfTst)
+xpredBestTst<-predict(xgb_lsbest, dxTst)
+
+#ROC, AUC performance
+#On Train Data
+pred_xgb_lsbest_trn=prediction(xpredBestTrn, lcdfTrn$loan_status,label.ordering = c("Charged Off", "Fully Paid"))
+
+aucPerf_xgb_lsbest_trn=performance(pred_xgb_lsbest_trn, "tpr", "fpr")
+plot(aucPerf_xgb_lsbest_trn)
+abline(a=0, b= 1)
+xg_roc_Trn <- roc(lcdfTrn$loan_status, xpredBestTrn)
+
+#On Test Data
+pred_xgb_lsbest=prediction(xpredBestTst, lcdfTst$loan_status,label.ordering = c("Charged Off", "Fully Paid"))
+aucPerf_xgb_lsM1=performance(pred_xgb_lsM1, "tpr", "fpr")
+plot(aucPerf_xgb_lsM1)
+abline(a=0, b= 1)
+xg_roc_Tst <- roc(lcdfTst$loan_status, xpredBestTst)
+
+#Which hyper-parameters work best – experiment with a grid of parameter values
+#xgbParamGrid <- expand.grid(
+#max_depth = c(2, 5),
+#eta = c(0.001, 0.01, 0.1) )
+
+
+#xgbParam <- list (
+#booster = "gbtree",
+#objective = " binary:logistic",
+#eta=0.01, #learning rate
+#max_depth=5,
+#min_child_weight=1,
+#colsample_bytree=0.6
+#)
+
+#for(i in 1:nrow(xgbParamGrid)) {
+#xgb_tune<- xgb.train(data=dxTrn,xgbParam,
+#nrounds=1000, early_stopping_rounds = 10, xgbWatchlist,
+#eta=xgbParamGrid$eta[i], max_depth=xgbParamGrid$max_depth[i] )
+#xgbParamGrid$bestTree[i] <- xgb_tune$evaluation_log[xgb_tune$best_iteration]$iter
+#xgbParamGrid$bestPerf[i] <- xgb_tune$evaluation_log[xgb_tune$best_iteration]$eval_auc
+#}
+```
+
+
+
+
+```{r}
+plot(rpDT2_roc_Trn,col="darkred", main = "ROC on Train Data")
+plot(c5_roc_Trn,col="darkgreen",add=TRUE)
+plot(rg_roc_Trn,col="orange",add=TRUE)
+#plot(xg_roc_Trn,col="blue",add=TRUE)
+legend(0.2,0.7, c('rpart','C5.0','ranger','xgboost'),lty=c(1,1), lwd=c(2,2),col=c('darkred','darkgreen','orange','blue'))
+
+plot(rpDT2_roc_Tst,col="darkred", main = "ROC on Test Data")
+plot(c5_roc_Tst,col="darkgreen",add=TRUE)
+plot(rg_roc_Trn,col="orange",add=TRUE)
+#plot(xg_roc_Tst,col="blue",add=TRUE)
+legend(0.2,0.7, c('rpart','C5.0','ranger','xgboost'),lty=c(1,1), lwd=c(2,2),col=c('darkred','darkgreen','orange','blue'))
+
+```
+

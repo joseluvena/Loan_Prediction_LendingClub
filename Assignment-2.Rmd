@@ -1,0 +1,1257 @@
+---
+title: "IDS 572 - Assignment 2"
+author: "Joseline Tanujaya, Sweta Bansal, Vibhanshu"
+output: html_document
+---
+```{r include=FALSE}
+
+library(tidyverse)
+library(lubridate)
+```
+
+```{r message=FALSE, include=FALSE}
+
+lcdf <- read_csv('lcDataSample5m.csv')
+lcdf <- lcdf %>% filter(loan_status == "Fully Paid" | loan_status == "Charged Off")
+```
+
+```{r Variable preparation, include=FALSE}
+#Term of the loan is the duration between the last-payment-date and the loan issue-date.
+# check the format of these two columns with date values
+head(lcdf[, c("last_pymnt_d", "issue_d")])
+
+# change the character type to date:
+lcdf$last_pymnt_d<-paste(lcdf$last_pymnt_d, "-01", sep = "")
+# convert this character to a date type variable
+lcdf$last_pymnt_d<-parse_date_time(lcdf$last_pymnt_d,  "myd")
+
+# for defaulted loans, set the actual-term at 3 years.
+lcdf$actualTerm <- ifelse(lcdf$loan_status=="Fully Paid", as.duration(lcdf$issue_d  %--% lcdf$last_pymnt_d)/dyears(1), 3)
+
+#Based on actual term, the actual annual return is
+lcdf$actualReturn <- ifelse(lcdf$actualTerm>0, ((lcdf$total_pymnt -lcdf$funded_amnt)/lcdf$funded_amnt)*(1/lcdf$actualTerm), 0)
+
+lcdf$annRet <- ((lcdf$total_pymnt -lcdf$funded_amnt)/lcdf$funded_amnt)*(12/36)*100
+
+```
+
+```{r Derived Attribute, include=FALSE}
+
+#Derived attribute 1: proportion of satisfactory bankcard accounts 
+lcdf$propSatisBankcardAccts <- ifelse(lcdf$num_bc_tl>0, lcdf$num_bc_sats/lcdf$num_bc_tl, 0)
+
+#Derived attribute 2: the length of borrower's history with LC: REMOVED BCS DERIVED FROM LEAKAGE DATA (issue_d)
+#lcdf$earliest_cr_line<-paste(lcdf$earliest_cr_line, "-01", sep = "")
+#lcdf$earliest_cr_line<-parse_date_time(lcdf$earliest_cr_line, "myd")
+ 
+#lcdf$borrHistory <- as.duration(lcdf$earliest_cr_line %--% lcdf$issue_d) / dyears(1)
+
+#Derived attribute 3: ratio of openAccounts to totalAccounts
+lcdf$prop_OpAccts_to_TotAccts <- ifelse(lcdf$open_acc >0, lcdf$open_acc/lcdf$total_acc, 0)
+
+#Derived attribute 4: ratio of loan amount to annual income
+lcdf$propLoanAmt_to_AnnInc <- lcdf$loan_amnt/lcdf$annual_inc
+
+#Derived attribute 5: ratio of total current balance to annual income: REMOVED BCS DERIVED FROM LEAKAGE DATA (tot_cur_bal)
+#lcdf$prop_CurBal_to_AnnIc <- lcdf$tot_cur_bal/lcdf$annual_inc
+```
+
+```{r NA Removal, include=FALSE}
+
+#drop variables with all NAs:
+lcdf <- lcdf %>% select_if(function(x){!all(is.na(x))})
+
+#remove variables which have more than 60% missing values, because the data available is insufficient to predict missing values.
+nm<-names(lcdf)[colMeans(is.na(lcdf))>0.6]
+lcdf <- lcdf %>% select(-nm)
+
+lcdf<- lcdf %>% replace_na(list(mths_since_last_delinq=500, bc_open_to_buy=mean(lcdf$bc_open_to_buy, na.rm=TRUE),  last_credit_pull_d='01-01-2015', mo_sin_old_il_acct=1000, mths_since_recent_bc=1000, mths_since_recent_inq=50, bc_util=median(lcdf$bc_util, na.rm=TRUE), num_tl_120dpd_2m = median(lcdf$num_tl_120dpd_2m, na.rm=TRUE),percent_bc_gt_75 = median(lcdf$percent_bc_gt_75, na.rm=TRUE), revol_util = median(lcdf$revol_util, na.rm = TRUE), emp_length= "< 1 year"))
+
+colMeans(is.na(lcdf))[colMeans(is.na(lcdf))>0]
+```
+
+```{r Data Leakage Removal, include=FALSE}
+#Drop some other variables
+varsToRemove <- c("X1",
+                  "funded_amnt",
+                  "funded_amnt_inv",
+                  "term",
+                  "emp_title",
+                  "issue_d",
+                  "delinq_2yrs",
+                  "pymnt_plan",
+                  "title",
+                  "zip_code",
+                  "addr_state",
+                  "delinq_2yrs",
+                  "inq_last_6mths", 
+                  "mths_since_last_delinq",
+                  "open_acc",
+                  "pub_rec",
+                  "revol_bal",
+                  "revol_util",
+                  "total_acc",
+                  "out_prncp",
+                  "out_prncp_inv",
+                  "total_pymnt_inv",
+                  "total_rec_prncp",
+                  "total_rec_int",
+                  "total_rec_late_fee",
+                  "recoveries",
+                  "collection_recovery_fee",
+                  "last_pymnt_d",
+                  "last_pymnt_amnt",
+                  "last_credit_pull_d",
+                  "policy_code",
+                  "application_type",
+                  "acc_now_delinq",
+                  "tot_coll_amt",
+                  "tot_cur_bal",
+                  "hardship_flag",
+                  "disbursement_method",
+                  "debt_settlement_flag",
+                  "earliest_cr_line",
+                  "num_tl_op_past_12m",
+                  "percent_bc_gt_75",
+                  "verification_status",
+                  "num_rev_tl_bal_gt_0",
+                  "num_actv_rev_tl",
+                  "num_actv_bc_tl",
+                  "pub_rec_bankruptcies",
+                  "num_accts_ever_120_pd",
+                  "collections_12_mths_ex_med",
+                  "num_tl_90g_dpd_24m",
+                  "num_tl_120dpd_2m"
+)
+lcdf <- lcdf %>% select(-varsToRemove)
+
+
+```
+
+```{r Change variable types, include=FALSE}
+#change chr to factors:
+lcdf$grade <- factor(lcdf$grade, levels=c("A", "B","C","D", "E","F","G"))
+
+lcdf$sub_grade <- factor(lcdf$sub_grade, levels=c("A1", "A2", "A3", "A4", "A5", "B1", "B2", "B3", "B4", "B5", "C1", "C2", "C3", "C4", "C5", "D1", "D2", "D3", "D4", "D5", "E1", "E2", "E3", "E4", "E5", "F1", "F2", "F3", "F4", "F5", "G1", "G2", "G3", "G4", "G5"))
+
+lcdf$initial_list_status <- factor(lcdf$initial_list_status, levels=c("w", "f"))
+
+lcdf$loan_status <- factor(lcdf$loan_status, levels=c("Fully Paid", "Charged Off"))
+
+lcdf$emp_length <- factor(lcdf$emp_length, levels=c("n/a", "< 1 year","1 year","2 years", "3 years" ,  "4 years",   "5 years",   "6 years",   "7 years" ,  "8 years", "9 years", "10+ years" ))
+
+lcdf$purpose <- fct_recode(lcdf$purpose, other="wedding", other="educational", other="renewable_energy")
+
+lcdf$home_ownership <- as.factor((lcdf$home_ownership))
+
+```
+
+
+```{r Split Train and Test Data}
+#split the data into trn, tst subsets
+set.seed(123)
+nr=nrow(lcdf)
+trnIndex = sample(1:nr, size = round(0.7*nr), replace=FALSE)
+lcdfTrn=lcdf[trnIndex,]
+lcdfTst = lcdf[-trnIndex,]
+
+dim(lcdfTrn)
+dim(lcdfTst)
+```
+
+
+## Predicting Loan Status with GLM
+
+In building the glm model, we adjusted several parameters: type.measure, alpha, and weights (balanced data).
+
+Below is the complete tabulation of the parameters and their resulting AUC.
+
+```{r echo=FALSE}
+read.csv("Assignment 2_GLMParam.csv")
+```
+
+We used AUC measures to define the best glm model. The models that we got are not too different with each other. However with very slight differences, we can still determine the best model. The best model is the one with balanced class of loan status (using weights), with ***type.measure = "deviance"***, ***alpha = 1*** with AUC of 0.6953326.
+
+We ran the code several times, and the model with balanced weights always give slightly better results. However, depending on the Train and Test data we build and test the models on, alpha = 1 or alpha = 0.7 can be the best options. When comparing the glm model with other models (ranger, xgboost), we will use alpha = 1.
+
+For variable selection method, we will scale the coefficients using the Lasso and Ridge regularization parameters. This is done by setting different values to alpha. When alpha = 1, we are using purely Lasso (L1). When alpha = 0, we are using purely Ridge (L2). Any value between 0-1 is attributed to the percentage using L1. For example, if alpha = 0.2, then L1 = 0.2 and L2 = (1 - 0.2) = 0.8. We have tried several values between 0-1, but the best result still comes from alpha = 1 (Lasso only). Lasso puts pressure on the coefficients to approach 0, therefore we are discarding some variables with low importance.
+
+We experimented using lambda 1se using the best models (with balanced weights). Lambda min has proven to be the better lambda option, since it has higher accuracy. There is no overfitting problems with our models, therefore we do not need to use a bigger lambda than lambda min. 
+
+The experimentation with type.measure will be documented at section 1B.
+
+```{r Lasso for GLM}
+library(glmnet)
+library(tidyverse)
+library(lubridate)
+library(tidyr)
+library(caret)
+library(prediction)
+library(ROCR)
+library(rpart)
+library(pROC)
+library(broom)
+
+levels(lcdfTrn$loan_status)
+
+yTrn<-factor(if_else(lcdfTrn$loan_status=="Fully Paid", '1', '0') )
+yTst<-factor(if_else(lcdfTst$loan_status=="Fully Paid", '1', '0') )
+
+xDTrn<-lcdfTrn %>% select(-loan_status, -actualTerm, -annRet, -actualReturn, -total_pymnt)
+xDTst<-lcdfTst %>% select(-loan_status, -actualTerm, -annRet, -actualReturn, -total_pymnt)
+
+#Use Lasso regularization (alpha = 1, default)
+glmls_cv<- cv.glmnet(data.matrix(xDTrn), yTrn, family="binomial")
+
+glmls_cv$lambda.min
+glmls_cv$lambda.1se
+
+#get the variables with non-zero coefficients from the regularized model
+nzCoef<-tidy(coef(glmls_cv, s= glmls_cv$lambda.1se))
+nzCoefVars <- nzCoef[-1,1] 
+
+plot(glmls_cv)
+
+coef(glmls_cv, s = glmls_cv$lambda.min)
+coef(glmls_cv, s = glmls_cv$lambda.1se)
+
+#find the index of the best lambda
+which(glmls_cv$lambda == glmls_cv$lambda.1se)
+
+glmls_cv$glmnet.fit$dev.ratio[which(glmls_cv$lambda == glmls_cv$lambda.1se) ]
+
+glmls_cv$glmnet.fit
+plot(glmls_cv$glmnet.fit)
+plot(glmls_cv$glmnet.fit, xvar="lambda")
+
+#as.matrix(coef(glmls_cv, s = glmls_cv$lambda.min))
+#as.matrix(coef(glmls_cv, s = glmls_cv$lambda.1se))
+
+
+#the labmda values used are in glmls_cv$lambda
+glmls_cv$lambda
+# and the cross-validation 'loss' at each lambda is in glmls_cv$cvm
+glmls_cv$cvm
+#So, to get the 'loss' value at lambda == lambda.1se
+glmls_cv$cvm [ which(glmls_cv$lambda == glmls_cv$lambda.1se) ]
+
+
+#PREDICTIONS on Train
+
+glmPredls_1=predict(glmls_cv,data.matrix(xDTrn), s="lambda.min" ) 
+
+glmPredls_1p=predict(glmls_cv,data.matrix(xDTrn), s="lambda.min", type="response" ) #gives the prob values
+# gives the the ln(p/(1-p)) values
+#i.e. the values of w1*x1 + ...+w2*x2
+
+
+# AUC using default type.measure = "deviance"
+predsauc <- prediction(glmPredls_1p, lcdfTrn$loan_status, label.ordering = c("Charged Off", "Fully Paid"))
+aucPerf <- performance(predsauc, "auc")
+aucPerf@y.values
+
+#PREDICTIONS on Test
+
+glmPredls_1_Tst=predict ( glmls_cv,data.matrix(xDTst), s="lambda.min" ) 
+
+glmPredls_1p_Tst=predict(glmls_cv,data.matrix(xDTst), s="lambda.min", type="response" ) #gives the prob values
+# gives the the ln(p/(1-p)) values
+#i.e. the values of w1*x1 + ...+w2*x2
+
+
+# AUC using default type.measure = "deviance"
+predsauc_Tst <- prediction(glmPredls_1p_Tst, lcdfTst$loan_status, label.ordering = c("Charged Off", "Fully Paid"))
+aucPerf_Tst <- performance(predsauc, "auc")
+aucPerf_Tst@y.values
+
+
+```
+Experiment with Ridge regularization as a variable selection method.
+
+```{r}
+#Use Ridge regularization (alpha = 0)
+glmls_cv_L2<- cv.glmnet(data.matrix(xDTrn), yTrn, family="binomial", alpha = 0)
+
+glmls_cv_L2$lambda.min
+glmls_cv_L2$lambda.1se
+
+plot(glmls_cv_L2)
+
+coef(glmls_cv_L2, s = glmls_cv_L2$lambda.min)
+coef(glmls_cv_L2, s = glmls_cv_L2$lambda.1se)
+
+#find the index of the best lambda
+which(glmls_cv_L2$lambda == glmls_cv_L2$lambda.1se)
+
+glmls_cv_L2$glmnet.fit$dev.ratio[which(glmls_cv_L2$lambda == glmls_cv_L2$lambda.1se) ]
+
+glmls_cv_L2$glmnet.fit
+plot(glmls_cv_L2$glmnet.fit)
+plot(glmls_cv_L2$glmnet.fit, xvar="lambda")
+
+#as.matrix(coef(glmls_cv_L2, s = glmls_cv_L2$lambda.min))
+#as.matrix(coef(glmls_cv_L2, s = glmls_cv_L2$lambda.1se))
+
+
+#the labmda values used are in glmls_cv_L2$lambda
+glmls_cv_L2$lambda
+# and the cross-validation 'loss' at each lambda is in glmls_cv_L2$cvm
+glmls_cv_L2$cvm
+#So, to get the 'loss' value at lambda == lambda.1se
+glmls_cv_L2$cvm [ which(glmls_cv_L2$lambda == glmls_cv_L2$lambda.1se) ]
+
+
+#PREDICTIONS on Trn
+
+glmPredls_1_L2=predict ( glmls_cv_L2,data.matrix(xDTrn), s="lambda.min" ) 
+
+glmPredls_1p_L2=predict(glmls_cv_L2,data.matrix(xDTrn), s="lambda.min", type="response" ) #gives the prob values
+# gives the the ln(p/(1-p)) values
+#i.e. the values of w1*x1 + ...+w2*x2
+
+
+# AUC using default type.measure = "deviance"
+preds_L2 <- prediction(glmPredls_1p_L2, lcdfTrn$loan_status, label.ordering = c("Charged Off", "Fully Paid"))
+aucPerf_L2 <- performance(preds_L2, "auc")
+aucPerf_L2@y.values
+
+#PREDICTIONS on Tst
+
+glmPredls_1_L2_Tst=predict(glmls_cv_L2,data.matrix(xDTst), s="lambda.min" )
+
+glmPredls_1p_L2_Tst=predict(glmls_cv_L2,data.matrix(xDTst), s="lambda.min", type="response" ) #gives the prob values
+# gives the the ln(p/(1-p)) values
+#i.e. the values of w1*x1 + ...+w2*x2
+
+
+# AUC using default type.measure = "deviance"
+preds_L2_Tst <- prediction(glmPredls_1p_L2_Tst, lcdfTst$loan_status, label.ordering = c("Charged Off", "Fully Paid"))
+aucPerf_L2_Tst <- performance(preds_L2_Tst, "auc")
+aucPerf_L2_Tst@y.values
+
+```
+```{r}
+#glm models with different Alpha values
+# alpha default, 1
+glmRet_cv<- cv.glmnet(data.matrix(xDTrn), lcdfTrn$actualReturn, family="gaussian")
+plot(glmRet_cv)
+glmRet_cv$lambda.min
+glmRet_cv$lambda.1se
+
+coef(glmRet_cv, s = glmRet_cv$lambda.min) %>% tidy()
+coef(glmRet_cv, s = glmRet_cv$lambda.1se) %>% tidy()
+
+# alpha = 0
+glmRet_cv_a0<- cv.glmnet(data.matrix(xDTrn), lcdfTrn$actualReturn, family="gaussian", alpha=0)
+plot(glmRet_cv)
+glmRet_cv_a0$lambda.min
+glmRet_cv_a0$lambda.1se
+
+coef(glmRet_cv_a0, s = glmRet_cv_a0$lambda.min) %>% tidy()
+coef(glmRet_cv_a0, s = glmRet_cv_a0$lambda.1se) %>% tidy()
+
+# alpha = 0.2
+glmRet_cv_a2<- cv.glmnet(data.matrix(xDTrn), lcdfTrn$actualReturn, family="gaussian", alpha=0.2)
+plot(glmRet_cv_a2)
+glmRet_cv_a2$lambda.min
+glmRet_cv_a2$lambda.1se
+
+coef(glmRet_cv_a2, s = glmRet_cv_a2$lambda.min) %>% tidy()
+coef(glmRet_cv_a2, s = glmRet_cv_a2$lambda.1se) %>% tidy()
+
+# alpha = 0.5
+glmRet_cv_a5<- cv.glmnet(data.matrix(xDTrn), lcdfTrn$actualReturn, family="gaussian", alpha=0.5)
+plot(glmRet_cv_a5)
+glmRet_cv_a5$lambda.min
+glmRet_cv_a5$lambda.1se
+
+coef(glmRet_cv_a5, s = glmRet_cv_a5$lambda.min) %>% tidy()
+coef(glmRet_cv_a5, s = glmRet_cv_a5$lambda.1se) %>% tidy()
+
+```
+
+
+
+```{r Balanced Data with glmnet, using weights}
+
+sum(yTrn == 0)
+sum(yTrn == 1)
+1-sum(yTrn == 0)/length(yTrn)
+1-sum(yTrn == 1)/length(yTrn)
+
+wts <- if_else(yTrn == 0, 1-sum(yTrn == 0)/length(yTrn), 1-sum(yTrn == 1)/length(yTrn))
+
+# Lasso regularization, balanced weights, type.measure='deviance'
+glmlsw_cv<- cv.glmnet(data.matrix(xDTrn), yTrn, family= "binomial", weights = wts, alpha = 1)
+plot(glmlsw_cv)
+
+#Prediction on Trn
+glmPredls_balp=predict(glmlsw_cv,data.matrix(xDTrn), s="lambda.min", type="response" )
+
+preds_auc_bal <- prediction(glmPredls_balp, lcdfTrn$loan_status, label.ordering = c("Charged Off", "Fully Paid"))
+aucPerf_bal <- performance(preds_auc_bal, "auc")
+aucPerf_bal@y.values
+
+#Prediction on Tst
+glmPredls_balp_Tst=predict(glmlsw_cv,data.matrix(xDTst), s="lambda.min", type="response" )
+
+preds_auc_bal_Tst <- prediction(glmPredls_balp_Tst, lcdfTst$loan_status, label.ordering = c("Charged Off", "Fully Paid"))
+aucPerf_bal_Tst <- performance(preds_auc_bal_Tst, "auc")
+aucPerf_bal_Tst@y.values
+
+
+```
+
+We tried building a non-regularized model, but the resulting AUC is no better than the best regularized glmnet model we have so far. The AUC on Test data is 0.6886417.
+
+```{r Non-regularized GLM Model}
+
+#build glm model without regularization, using coefficient from the cross-validated model.
+glmls_nzv_2 <- glm(yTrn ~ data.matrix(xDTrn %>% select(nzCoefVars)), family=binomial())
+summary(glmls_nzv_2)
+tidy(glmls_nzv_2)
+
+#PREDICTIONS on Trn
+glmPredls_1_nonreg= predict(glmls_nzv_2,xDTrn)
+
+glmPredls_1p_nonreg=predict(glmls_nzv_2, xDTrn, type="response" ) #gives the prob values
+
+# AUC using non regularized glm
+preds_nonreg <- prediction(glmPredls_1p_nonreg, lcdfTrn$loan_status, label.ordering = c("Charged Off", "Fully Paid"))
+aucPerf_nonreg <- performance(preds_nonreg, "auc")
+aucPerf_nonreg@y.values
+
+#PREDICTIONS on Tst
+glmPredls_1_nonreg_Tst= predict(glmls_nzv_2,xDTst)
+
+glmPredls_1p_nonreg_Tst=predict(glmls_nzv_2, xDTst, type="response" ) #gives the prob values
+
+# AUC using non regularized glm
+preds_nonreg_Tst <- prediction(glmPredls_1p_nonreg_Tst, lcdfTrn$loan_status, label.ordering = c("Charged Off", "Fully Paid"))
+aucPerf_nonreg_Tst <- performance(preds_nonreg, "auc")
+aucPerf_nonreg_Tst@y.values
+
+```
+
+
+```{r}
+#Use no cross-validation model
+glmls_1 <- glmnet(data.matrix(xDTrn), yTrn, family="binomial", lambda = glmls_cv$lambda.1se )
+glmls_1
+
+```
+
+
+## 1B. Experiment with loss and link function
+
+Link function is used to fit our target variable to the requirement for the scale of glm. A glm, like any regression model, fits the target variable to a scale from negative infinity to positive infinity. In this case, a prediction of two classes (either "Fully Paid" or "Charged Off") does not fulfil this criteria. Therefore, the family parameter helps to set the condition of our model to fit the glm algorithm.
+
+For the binomial family, the valid link functions are logit, probit, cauchit. We set the family to binomial and we use the link function logit. Logit is taking the log of the odds of class 1 for the dependent variable loan status.
+
+The loss function we choose will be tuned in the parameter "type.measure". Since this is a logistic regression, there are three possible loss functions we can use.
+
+We experimented on the loss functions: deviance, auc, and class. Please refer to the first table for the results for which one gave the best AUC performance. Type.measure = deviance constantly gives the best AUC performance despite other parameters. Type.measure = auc gives similar results, but deviance still gives the best results on test data.
+
+For models using type.measure = deviance (default), please refer to the answers for question 1A.
+
+
+Link Function source:
+https://www.r-bloggers.com/2018/10/generalized-linear-models-understanding-the-link-function/
+
+```{r}
+#experiment with type.measure (LOSS FUNCTION), with alpha = 1
+
+#type.measure = "auc"
+glmls_cv_auc<- cv.glmnet(data.matrix(xDTrn), yTrn, family="binomial", type.measure = "auc")
+plot(glmls_cv_auc)
+
+#PREDICTIONS with AUC model with Train Data
+glmPredls_1_auc=predict(glmls_cv_auc,data.matrix(xDTrn), s="lambda.min" ) 
+
+glmPredls_1p_auc=predict(glmls_cv_auc,data.matrix(xDTrn), s="lambda.min", type="response" ) #gives the prob values
+# gives the the ln(p/(1-p)) values
+#i.e. the values of w1*x1 + ...+w2*x2
+
+
+preds_auc <- prediction(glmPredls_1p_auc, lcdfTrn$loan_status, label.ordering = c("Charged Off", "Fully Paid"))
+aucPerf_auc <- performance(preds_auc, "auc")
+aucPerf_auc@y.values
+
+#PREDICTIONS with AUC model on Test Data
+glmPredls_1_auc_Tst=predict(glmls_cv_auc,data.matrix(xDTst), s="lambda.min" ) 
+
+glmPredls_1p_auc_Tst=predict(glmls_cv_auc,data.matrix(xDTst), s="lambda.min", type="response" ) #gives the prob values
+# gives the the ln(p/(1-p)) values
+#i.e. the values of w1*x1 + ...+w2*x2
+
+
+preds_auc_Tst <- prediction(glmPredls_1p_auc_Tst, lcdfTst$loan_status, label.ordering = c("Charged Off", "Fully Paid"))
+aucPerf_auc_Tst <- performance(preds_auc_Tst, "auc")
+aucPerf_auc_Tst@y.values
+
+#the labmda values used
+glmls_cv_auc$lambda
+# and the cross-validation 'loss' at each lambda
+glmls_cv_auc$cvm
+#So, to get the 'loss' value at lambda == lambda.1se
+glmls_cv_auc$cvm [ which(glmls_cv_auc$lambda == glmls_cv_auc$lambda.1se) ]
+
+
+#type.measure = "class"
+glmls_cv_class<- cv.glmnet(data.matrix(xDTrn), yTrn, family="binomial", type.measure = "class")
+plot(glmls_cv_class)
+
+#PREDICTIONS with "class" model on Train
+glmPredls_1_class=predict(glmls_cv_class,data.matrix(xDTrn), s="lambda.min" ) 
+
+glmPredls_1p_class=predict(glmls_cv_class,data.matrix(xDTrn), s="lambda.min", type="response" ) #gives the prob values
+# gives the the ln(p/(1-p)) values
+#i.e. the values of w1*x1 + ...+w2*x2
+
+
+preds_class <- prediction(glmPredls_1p_class, lcdfTrn$loan_status, label.ordering = c("Charged Off", "Fully Paid"))
+aucPerf_class <- performance(preds_class, "auc")
+aucPerf_class@y.values
+
+#PREDICTIONS with "class" model on Test
+glmPredls_1_class_Tst=predict(glmls_cv_class,data.matrix(xDTst), s="lambda.min" ) 
+
+glmPredls_1p_class_Tst=predict(glmls_cv_class,data.matrix(xDTst), s="lambda.min", type="response" ) #gives the prob values
+# gives the the ln(p/(1-p)) values
+#i.e. the values of w1*x1 + ...+w2*x2
+
+
+preds_class_Tst <- prediction(glmPredls_1p_class_Tst, lcdfTst$loan_status, label.ordering = c("Charged Off", "Fully Paid"))
+aucPerf_class_Tst <- performance(preds_class_Tst, "auc")
+aucPerf_class_Tst@y.values
+
+#the labmda values used
+glmls_cv_class$lambda
+# and the cross-validation 'loss' at each lambda
+glmls_cv_class$cvm
+#So, to get the 'loss' value at lambda == lambda.1se
+glmls_cv_class$cvm [ which(glmls_cv_class$lambda == glmls_cv_class$lambda.1se) ]
+```
+
+
+```{r}
+#experiment with type.measure, with alpha = 0
+
+#type.measure = "auc"
+glmls_cv_auc_L2<- cv.glmnet(data.matrix(xDTrn), yTrn, family="binomial", type.measure = "auc", alpha = 0)
+plot(glmls_cv_auc_L2)
+
+#PREDICTIONS with AUC model on Trn
+glmPredls_1_auc_L2=predict(glmls_cv_auc_L2,data.matrix(xDTrn), s="lambda.min" ) 
+
+glmPredls_1p_auc_L2=predict(glmls_cv_auc_L2,data.matrix(xDTrn), s="lambda.min", type="response" ) #gives the prob values
+# gives the the ln(p/(1-p)) values
+#i.e. the values of w1*x1 + ...+w2*x2
+
+
+preds_auc_L2 <- prediction(glmPredls_1p_auc_L2, lcdfTrn$loan_status, label.ordering = c("Charged Off", "Fully Paid"))
+aucPerf_auc_L2 <- performance(preds_auc_L2, "auc")
+aucPerf_auc_L2@y.values
+
+#PREDICTIONS with AUC model on Test
+glmPredls_1_auc_L2_Tst=predict(glmls_cv_auc_L2,data.matrix(xDTst), s="lambda.min" ) 
+
+glmPredls_1p_auc_L2_Tst=predict(glmls_cv_auc_L2,data.matrix(xDTst), s="lambda.min", type="response" ) #gives the prob values
+# gives the the ln(p/(1-p)) values
+#i.e. the values of w1*x1 + ...+w2*x2
+
+
+preds_auc_L2_Tst <- prediction(glmPredls_1p_auc_L2_Tst, lcdfTst$loan_status, label.ordering = c("Charged Off", "Fully Paid"))
+aucPerf_auc_L2_Tst <- performance(preds_auc_L2_Tst, "auc")
+aucPerf_auc_L2_Tst@y.values
+
+#the labmda values used
+glmls_cv_auc_L2$lambda
+# and the cross-validation 'loss' at each lambda
+glmls_cv_auc_L2$cvm
+#So, to get the 'loss' value at lambda == lambda.1se
+glmls_cv_auc_L2$cvm [ which(glmls_cv_auc_L2$lambda == glmls_cv_auc_L2$lambda.1se) ]
+
+
+#type.measure = "class"
+glmls_cv_class_L2<- cv.glmnet(data.matrix(xDTrn), yTrn, family="binomial", type.measure = "class", alpha = 0)
+plot(glmls_cv_class_L2)
+
+#PREDICTIONS with "class" model on Trn
+glmPredls_1_class_L2=predict(glmls_cv_class_L2,data.matrix(xDTrn), s="lambda.min" ) 
+
+glmPredls_1p_class_L2=predict(glmls_cv_class_L2,data.matrix(xDTrn), s="lambda.min", type="response" ) #gives the prob values
+# gives the the ln(p/(1-p)) values
+#i.e. the values of w1*x1 + ...+w2*x2
+
+
+preds_class_L2 <- prediction(glmPredls_1p_class_L2, lcdfTrn$loan_status, label.ordering = c("Charged Off", "Fully Paid"))
+aucPerf_class_L2 <- performance(preds_class_L2, "auc")
+aucPerf_class_L2@y.values
+
+#PREDICTIONS with "class" model on Tst
+glmPredls_1_class_L2_Tst=predict(glmls_cv_class_L2,data.matrix(xDTst), s="lambda.min" ) 
+
+glmPredls_1p_class_L2_Tst=predict(glmls_cv_class_L2,data.matrix(xDTst), s="lambda.min", type="response" ) #gives the prob values
+# gives the the ln(p/(1-p)) values
+#i.e. the values of w1*x1 + ...+w2*x2
+
+
+preds_class_L2_Tst <- prediction(glmPredls_1p_class_L2_Tst, lcdfTst$loan_status, label.ordering = c("Charged Off", "Fully Paid"))
+aucPerf_class_L2_Tst <- performance(preds_class_L2_Tst, "auc")
+aucPerf_class_L2_Tst@y.values
+
+#the labmda values used
+glmls_cv_class_L2$lambda
+# and the cross-validation 'loss' at each lambda
+glmls_cv_class_L2$cvm
+#So, to get the 'loss' value at lambda == lambda.1se
+glmls_cv_class_L2$cvm [ which(glmls_cv_class_L2$lambda == glmls_cv_class_L2$lambda.1se) ]
+
+```
+
+## 1C
+
+Compared to random forest and xgboost models that we created last time, the results are pretty similar. The AUC scores on test data are all around .69. Ranger is especially accurate on the training set, scoring around .79. However, the ranger's random forest score for test data is no different to the other models.
+
+## 1D
+
+The variable importance of the glm model conflicts with those of ranger and xgboost (even with rpart and C5.0 decision trees). The different models have different algorithms, hence the different variable importance.
+To some extent, multicollinearity can help to explain the differences. In linear models, correlated independent variables can turn out to have weaker coefficients than they are supposed to have independently (IDS 570, Linear Regression Lecture Material).
+
+Installment is ranked as the 11th most important in ranger, and 9th in XGboost, but it is ranked 29th in glmnet. This variable is at the top of the multicollinearity list, highly correlated with loan_amnt. This evidence alludes to our hypothesis that is multicollinearity exists, the coefficients do not reflect the true relationships of the independent variable with the target variable.
+
+For the complete comparison of the variable importance between different models, please refer to our Appendix: Variable importance for different models.
+
+Source: https://www.r-bloggers.com/2020/07/comparing-variable-importance-functions-for-modeling/
+
+```{r}
+library(corrplot)
+xCorr <- xDTrn %>% select_if(is.numeric) %>% cor()
+corrplot(xCorr, method="circle")
+corrTH = 0.5
+xCorr[upper.tri(xCorr, diag=TRUE)] <- NA #set the upper-diagonal values to NA
+xCorr <- as.data.frame(as.table(xCorr))
+xCorr <- na.omit(xCorr) #remove the rows corresponding to NA values
+xCorr_th <- xCorr %>% filter(abs(Freq) > corrTH ) #remove the rows with abs(values) < corrTH
+xCorr_th <- xCorr_th[order(-abs(xCorr_th$Freq)),] #order by the corr values
+
+#Convert back to matrix form to use with corrPlot
+xCorrMat <- xCorr_th %>% pivot_wider(names_from = Var2, values_from = Freq)
+xCorrMat<-column_to_rownames(xCorrMat, var="Var1") #convert first column to rownames
+
+corrplot(as.matrix(xCorrMat), is.corr=FALSE, na.label=" ", method="circle")
+
+```
+
+## 1E
+
+We tried to balance the two classes represented in the target variable when building the model. We are using 3 methods:
+- under sampling (US): under sample the majority class, in this case "Fully Paid". The resulting training dataset has less data points (about 16,000 data points)
+- over sampling (OS): over sample the majority class, in this case "Charged Off". The resulting training dataset has more data points (about 96,000 data points)
+- both (under sampling and over sampling) (BS): combining both under sampling and over sampling, resulting in moderate number of data points (56,000 data points)
+
+We build models with identical parameters (alpha = 1, type.measure = deviance) except for the training data set. The reason for this combination is that this combination resulted in the best AUC scores according to our experiment.
+
+After running the code repeatedly, we have very similar results between OS, US, and BS. They only vary within less than .01 decimal points, and the order of AUC scores changes. This imply that the models we build are data dependent, and no method is ultimately better than the other.
+
+We did not find evidence that concludes more data points caused by oversampling results in better models. This is intuitively true because copying/deleting existing examples do not enrich our dataset.
+
+However, in the event of availability of new real data, more data is preferable.
+"Ideally, once you have more training examples you'll have lower test-error (variance of the model decrease, meaning we are less overfitting), but theoretically, more data doesn't always mean you will have more accurate model since high bias models will not benefit from more training examples."
+
+Source: https://stats.stackexchange.com/questions/31249/what-impact-does-increasing-the-training-data-have-on-the-overall-system-accurac#:~:text=Ideally%2C%20once%20you%20have%20more,benefit%20from%20more%20training%20examples.
+
+
+
+```{r}
+
+library(ROSE)
+
+#Balancing the (training) data -- with over- and under-sampling
+
+
+dim(lcdfTrn)
+dim(lcdfTst)
+
+
+us_lcdfTrn<-ovun.sample(loan_status~., data = as.data.frame(lcdfTrn), na.action = na.pass, method="under", p=0.5)$data
+dim(us_lcdfTrn)
+#dim(lcdfTrn)
+us_lcdfTrn %>% group_by(loan_status) %>% tally()
+
+
+
+os_lcdfTrn<-ovun.sample(loan_status~., data = as.data.frame(lcdfTrn), na.action = na.pass, method="over", p=0.5)$data
+dim(os_lcdfTrn)
+os_lcdfTrn %>% group_by(loan_status) %>% tally()
+
+
+bs_lcdfTrn<-ovun.sample(loan_status~., data = as.data.frame(lcdfTrn), na.action = na.pass, method="both", p=0.5)$data
+dim(bs_lcdfTrn)
+bs_lcdfTrn %>% group_by(loan_status) %>% tally()
+
+
+
+yTrn_bs<-factor(if_else(bs_lcdfTrn$loan_status=="Fully Paid", '1', '0') )
+yTrn_os<-factor(if_else(os_lcdfTrn$loan_status=="Fully Paid", '1', '0') )
+yTrn_us<-factor(if_else(us_lcdfTrn$loan_status=="Fully Paid", '1', '0') )
+
+
+bs_lcdfTrn_del<-bs_lcdfTrn %>% select(-loan_status, -actualTerm, -annRet, -actualReturn, -total_pymnt)
+os_lcdfTrn_del<-os_lcdfTrn %>% select(-loan_status, -actualTerm, -annRet, -actualReturn, -total_pymnt)
+us_lcdfTrn_del<-us_lcdfTrn %>% select(-loan_status, -actualTerm, -annRet, -actualReturn, -total_pymnt)
+
+
+
+
+
+glmls_cv_bs<- cv.glmnet(data.matrix(bs_lcdfTrn_del), yTrn_bs, family="binomial")
+glmls_cv_os<- cv.glmnet(data.matrix(os_lcdfTrn_del), yTrn_os, family="binomial")
+glmls_cv_us<- cv.glmnet(data.matrix(us_lcdfTrn_del), yTrn_us, family="binomial")
+
+
+#BS
+glmPredls_1_bs=predict ( glmls_cv_bs,data.matrix(bs_lcdfTrn_del), s="lambda.min" )
+
+glmPredls_1p_bs=predict(glmls_cv_bs,data.matrix(bs_lcdfTrn_del), s="lambda.min", type="response" )
+
+predsauc_bs <- prediction(glmPredls_1p_bs, bs_lcdfTrn$loan_status, label.ordering = c("Charged Off", "Fully Paid"))
+aucPerf_bs <- performance(predsauc_bs, "auc")
+aucPerf_bs@y.values
+
+#OS
+glmPredls_1_os=predict ( glmls_cv_os,data.matrix(os_lcdfTrn_del), s="lambda.min" )
+
+glmPredls_1p_os=predict(glmls_cv_os,data.matrix(os_lcdfTrn_del), s="lambda.min", type="response" )
+
+predsauc_os <- prediction(glmPredls_1p_os, os_lcdfTrn$loan_status, label.ordering = c("Charged Off", "Fully Paid"))
+aucPerf_os <- performance(predsauc_os, "auc")
+aucPerf_os@y.values
+
+#US
+glmPredls_1_us=predict ( glmls_cv_us,data.matrix(us_lcdfTrn_del), s="lambda.min" )
+
+glmPredls_1p_us=predict(glmls_cv_us,data.matrix(us_lcdfTrn_del), s="lambda.min", type="response" )
+
+predsauc_us <- prediction(glmPredls_1p_us, us_lcdfTrn$loan_status, label.ordering = c("Charged Off", "Fully Paid"))
+aucPerf_us <- performance(predsauc_us, "auc")
+aucPerf_us@y.values
+
+
+```
+# Q2: Create Models to Predict Actual Return
+
+The variable "actualReturn" is the ratio of money made by the investors out of their total investment. It is created by subtracting the funded amount (amount invested by investors) from the total payment (amount paid to lending club by borrowers), divided by the funded amount. So far it only reflects the annual return, so we multiply it by the actual term of the loan (how long it takes for the loan to be paid back). This is true only if there was any attempt to pay back the loan at all (the actualTerm is > 0). If the loan was never paid back, this calculation does not reflect the actualReturn, so we assign the value 0 (there is no return/money made from that loan). The actualReturn variable DOES NOT account for Lending Club's service fees (2-6% from the borrowers, and 1% from the investors).
+
+"Lending Club makes money by charging borrowers an origination fee and investors a service fee. The size of the origination fee depends on the credit grade and ranges to be 2%-6.0% of the loan amount. The size
+of the service fee is 1% on all amounts the borrower pays."
+Source: 
+- https://www.investopedia.com/articles/investing/092315/7-best-peertopeer-lending-websites.asp
+- https://en.wikipedia.org/wiki/LendingClub
+
+To calculate the true income for the investors, the actualReturn should be subtracted by 1% if the value is not 0 (at least 1 pay back was made on the loan).
+
+
+```{R}
+library(glmnet)
+library(tidyverse)
+library(lubridate)
+
+#Decile table with glmnet for Actual Return
+
+xD<- lcdfTrn %>% select(-loan_status, -actualTerm, -annRet, -actualReturn, -total_pymnt)
+glmRet_cv<- cv.glmnet(data.matrix(xD), lcdfTrn$actualReturn, family="gaussian")
+plot(glmRet_cv)
+
+
+#plot ( (predict(glmRet_cv, data.matrix(lcdfTrn %>% select(-loan_status, -actualTerm, -annRet, -actualReturn, -total_pymnt)), s="lambda.min" )), lcdfTrn$actualReturn, main = "GLM Actual Return Model on Training Data")
+#plot ( (predict(glmRet_cv, data.matrix(lcdfTst %>% select(-loan_status, -actualTerm, -annRet, -actualReturn, -total_pymnt)), s="lambda.min" )), lcdfTst$actualReturn, main = "GLM Actual Return Model on Test Data")
+
+#On Train Data
+predRet_Trn_glm <- lcdfTrn %>% select(grade, loan_status, actualReturn, actualTerm, int_rate) %>% mutate(predRet= predict(glmRet_cv, data.matrix(lcdfTrn %>% select(-loan_status, -actualTerm, -annRet, -actualReturn, -total_pymnt)),s="lambda.min" ))
+predRet_Trn_glm <- predRet_Trn_glm %>% mutate(tile=ntile(-predRet, 10))
+predRet_Trn_glm %>% group_by(tile) %>% summarise(count=n(), avgpredRet=mean(predRet), numDefaults=sum(loan_status=="Charged Off"),
+avgActRet=mean(actualReturn), minRet=min(actualReturn), maxRet=max(actualReturn), avgTer=mean(actualTerm), totA=sum(grade=="A"),
+totB=sum(grade=="B" ), totC=sum(grade=="C"), totD=sum(grade=="D"), totE=sum(grade=="E"), totF=sum(grade=="F") )
+
+#on Test Data
+predRet_Tst_glm <- lcdfTst %>% select(grade, loan_status, actualReturn, actualTerm, int_rate) %>% mutate(predRet= predict(glmRet_cv, data.matrix(lcdfTst %>% select(-loan_status, -actualTerm, -annRet, -actualReturn, -total_pymnt)),
+s="lambda.min" ))
+
+predRet_Tst_glm <- predRet_Tst_glm %>% mutate(tile=ntile(-predRet, 10))
+
+predRet_Tst_glm %>% group_by(tile) %>% summarise(count=n(), avgpredRet=mean(predRet), numDefaults=sum(loan_status=="Charged Off"),
+avgActRet=mean(actualReturn), minRet=min(actualReturn), maxRet=max(actualReturn), avgTer=mean(actualTerm), totA=sum(grade=="A"),
+totB=sum(grade=="B" ), totC=sum(grade=="C"), totD=sum(grade=="D"), totE=sum(grade=="E"), totF=sum(grade=="F") )
+
+
+```
+
+We created the decile table for Training and Test data using the glmnet model. Our model is able to distinguish the loans with the highest actualReturn, which are concentrated on the top deciles. As we go down the deciles, the average predicted return decreases.
+
+However, this model does not avoid defaults very well. Even though the Average Actual Return for the top deciles are the highest, there are too many defaults. Combining the Actual Return and Loan Status model is necessary.
+
+```{r Ranger to Predict Actual Return}
+library(ranger)
+
+
+rfModel_Ret <- ranger(actualReturn ~., data=subset(lcdfTrn, select=-c(loan_status, annRet, actualTerm, total_pymnt)), importance = "permutation", num.trees =200)
+rfPredRet_trn<- predict(rfModel_Ret, lcdfTrn)
+sqrt(mean( (rfPredRet_trn$predictions - lcdfTrn$actualReturn)^2))
+#sqrt(mean( ( (predict(rfModel_Ret, lcdfTst))$predictions - lcdfTst$actualReturn)^2))
+plot ( (predict(rfModel_Ret, lcdfTrn))$predictions, lcdfTrn$actualReturn, main = "RF Actual Return Model on Training Data")
+plot ( (predict(rfModel_Ret, lcdfTst))$predictions, lcdfTst$actualReturn, main = "RF Actual Return Model on Test Data")
+
+
+#Performance by deciles on Trn
+predRet_Trn_rf <- lcdfTrn %>% select(grade, loan_status, actualReturn, actualTerm, int_rate) %>% mutate(predRet=(predict(rfModel_Ret, lcdfTrn))$predictions)
+
+predRet_Trn_rf <- predRet_Trn_rf %>% mutate(tile=ntile(-predRet, 10))
+
+predRet_Trn_rf %>% group_by(tile) %>% summarise(count=n(), avgpredRet=mean(predRet), numDefaults=sum(loan_status=="Charged Off"),
+avgActRet=mean(actualReturn), minRet=min(actualReturn), maxRet=max(actualReturn), avgTer=mean(actualTerm), totA=sum(grade=="A"), totB=sum(grade=="B"
+), totC=sum(grade=="C"), totD=sum(grade=="D"), totE=sum(grade=="E"), totF=sum(grade=="F") )
+
+#Performance by deciles on Tst
+predRet_Tst_rf <- lcdfTst %>% select(grade, loan_status, actualReturn, actualTerm, int_rate) %>% mutate(predRet=(predict(rfModel_Ret, lcdfTst))$predictions)
+
+predRet_Tst_rf <- predRet_Tst_rf %>% mutate(tile=ntile(-predRet, 10))
+
+predRet_Tst_rf %>% group_by(tile) %>% summarise(count=n(), avgpredRet=mean(predRet), numDefaults=sum(loan_status=="Charged Off"),
+avgActRet=mean(actualReturn), minRet=min(actualReturn), maxRet=max(actualReturn), avgTer=mean(actualTerm), totA=sum(grade=="A"), totB=sum(grade=="B"
+), totC=sum(grade=="C"), totD=sum(grade=="D"), totE=sum(grade=="E"), totF=sum(grade=="F") )
+
+```
+The ranger RF model performed well on Train Data, but never quite as good on Test Data. This is a sign of overfit. To avoid overfit, we tried several parameters to tune our ranger model: max.depth = (30, 20, 10, 6, 4, default of NULL), mtry (4, 6, 8), min.node.size = (10, 20, default 5), num.trees = (200, 500, 1000), sample.fraction = 0.5 and default of 1, replace=FALSE, respect.unordered.factors = "order", verbose = TRUE , seed=0. The problem with our experiment is that none of the changes of parameters lead to a change in the model's performance on test data.
+
+When we included total_pymnt in building the model, the performance increased significantly for Test Data. However, we are aware that total_pymnt is a leakage variable, therefore we cannot include it in the model.
+
+We created the decile table for Training and Test data using the ranger model. Our model is able to distinguish the loans with the highest actualReturn, which are concentrated on the top deciles. As we go down the deciles, the average predicted return decreases.
+
+However, this model does not avoid defaults very well. Even though the Average Actual Return for the top deciles are the highest, there are too many defaults. Combining the Actual Return and Loan Status model is necessary.
+
+
+```{r XGB to predict actualReturn}
+library(xgboost)
+set.seed(12)
+
+xDTrn_Ret <-lcdfTrn %>% select(-loan_status, -actualTerm, -annRet, -total_pymnt)
+xDTst_Ret <-lcdfTst %>% select(-loan_status, -actualTerm, -annRet, -total_pymnt)
+
+
+x = grep("actualReturn", colnames(xDTrn_Ret))
+
+train_x = data.matrix(xDTrn_Ret[, -x])
+train_y = data.matrix(xDTrn_Ret[,x])
+
+test_x = data.matrix(xDTst_Ret[, -x])
+test_y = data.matrix(xDTst_Ret[, x])
+
+test_500_x = test_x[1:500,]
+test_500_y = test_y[1:500,]
+
+xgb_train = xgb.DMatrix(data = train_x, label = train_y)
+xgb_test = xgb.DMatrix(data = test_x, label = test_y)
+xgb_500_test = xgb.DMatrix(data = test_500_x, label = test_500_y)
+
+xgbParam_1 <- list (max.depth = 8, eval_metric="error", eta = 0.1)
+
+#best model
+xgb_lsbest_ret <- xgb.train(xgbParam_1, xgb_train, nrounds = 1000)
+
+
+print(xgb_lsbest_ret)
+
+pred_y = predict(xgb_lsbest_ret, xgb_test)
+
+mse = mean((test_y - pred_y)^2)
+mae = caret::MAE(test_y, pred_y)
+rmse = caret::RMSE(test_y, pred_y)
+
+cat("MSE: ", mse, "MAE: ", mae, " RMSE: ", rmse)
+
+x = 1:length(test_y)
+plot(x, test_y, col = "red", type = "l", main = "Prediction on All Test Data Points")
+lines(x, pred_y, col = "blue", type = "l")
+legend(x = 1, y = 38,  legend = c("original test_y", "predicted test_y"), col = c("red", "blue"), box.lty = 1, cex = 0.8, lty = c(1, 1))
+
+pred_500_y = predict(xgb_lsbest_ret, xgb_500_test)
+
+x = 1:length(test_500_y)
+plot(x, test_500_y, col = "red", type = "l", main = "Prediction on 500 Test Data Points")
+lines(x, pred_500_y, col = "blue", type = "l")
+legend(x = 1, y = 38,  legend = c("original test_500_y", "predicted test_500_y"), col = c("red", "blue"), box.lty = 1, cex = 0.8, lty = c(1, 1))
+plot ( (predict(xgb_lsbest_ret, train_x)), lcdfTrn$actualReturn, main = "XGB Actual Return Model on Training Data")
+plot ( (predict(xgb_lsbest_ret, test_x)), lcdfTst$actualReturn, main = "XGB Actual Return Model on Test Data")
+
+#Performance by deciles on Trn
+predRet_Trn_xgb <- lcdfTrn %>% select(grade, loan_status, actualReturn, actualTerm, int_rate) %>% mutate(predRet=(predict(xgb_lsbest_ret, train_x)))
+
+predRet_Trn_xgb <- predRet_Trn_xgb %>% mutate(tile=ntile(-predRet, 10))
+
+predRet_Trn_xgb %>% group_by(tile) %>% summarise(count=n(), avgpredRet=mean(predRet), numDefaults=sum(loan_status=="Charged Off"),
+avgActRet=mean(actualReturn), minRet=min(actualReturn), maxRet=max(actualReturn), avgTer=mean(actualTerm), totA=sum(grade=="A"), totB=sum(grade=="B"
+), totC=sum(grade=="C"), totD=sum(grade=="D"), totE=sum(grade=="E"), totF=sum(grade=="F") )
+
+#Performance by deciles on Tst
+predRet_Tst_xgb <- lcdfTst %>% select(grade, loan_status, actualReturn, actualTerm, int_rate) %>% mutate(predRet=(predict(xgb_lsbest_ret, test_x)))
+
+predRet_Tst_xgb <- predRet_Tst_xgb %>% mutate(tile=ntile(-predRet, 10))
+
+predRet_Tst_xgb %>% group_by(tile) %>% summarise(count=n(), avgpredRet=mean(predRet), numDefaults=sum(loan_status=="Charged Off"),
+avgActRet=mean(actualReturn), minRet=min(actualReturn), maxRet=max(actualReturn), avgTer=mean(actualTerm), totA=sum(grade=="A"), totB=sum(grade=="B"
+), totC=sum(grade=="C"), totD=sum(grade=="D"), totE=sum(grade=="E"), totF=sum(grade=="F") )
+
+```
+source: https://www.datatechnotes.com/2020/08/regression-example-with-xgboost-in-r.html
+
+With the XGboost model, we tried the parameters max.depth and eta.
+eta - It makes the model more robust by shrinking the weights on each step. Typical values are 0.01-0.2 and the default value is 0.3. When experimenting with all the values and the parameters, we have troubles finding the correct combination to give better results on Test Data. The change in parameters did not result in notable changes in performance for Test, but it did for Train Data. We proceed with eta = 0.1, nrounds = 1000, max.depth = 6. We did this because we needed to counter the high bias even in Training data predictions. This improved our performance in Train Data, but not Test Data (before this, the model was weak on both).
+
+We created the decile table for Training and Test data using the XGB model. Our model is able to distinguish the loans with the highest actualReturn, which are concentrated on the top deciles. As we go down the deciles, the average predicted return decreases.
+
+However, this model does not avoid defaults very well. Even though the Average Actual Return for the top deciles are the highest, there are too many defaults. Combining the Actual Return and Loan Status model is necessary.
+
+
+# Q3: Combining Loan Status and Actual Return Model
+
+Combining Loan Status and Actual Return models is necessary because:
+- Loan Status prediction alone only contains loans from the higher grades (A or B), resulting in low average actual return. This makes sense because loans from higher grades are safer from defaults, but have lower interest rates for investors.
+- Prediction from Actual Return alone only prioritizes the actual returns, but it does a poor job in avoiding defaults. Since the cost of a default could be much higher than any return, we should account for the defaults.
+
+The combined predictions is made by:
+- Taking the prediction on actual return.
+- Adding the probability of a fully paid loan for each data point (score from loan status model).
+- Taking the top decile of this combination, meaning we are taking the loans those are predicted to have the highest returns.
+- Sorting the top decile by the score from loan status model, from highest probability of a fully paid to the lowest.
+
+This best Loan Status models for RF and XGB were copied from last assignment's best model. Please refer to Q1 for best GLM model on Loan Status.
+
+```{r Ranger RF model for Loan Status}
+rgModel1 <- ranger(loan_status ~., data=subset(bs_lcdfTrn, select=-c(annRet, actualTerm, actualReturn, total_pymnt)), num.trees =200, importance='permutation', mtry = 7, max.depth = 10, min.node.size = 30, sample.fraction = 0.5, replace=FALSE, respect.unordered.factors = "order" , verbose = TRUE , seed=0, probability = TRUE)
+```
+
+
+```{r XGB for Loan Status}
+
+library(xgboost)
+library(caret)
+
+dumVar<-dummyVars(~.,data=lcdf %>% select(-loan_status))
+dxlcdf<- predict(dumVar,lcdf)
+
+# for loan_status, check levels and convert to dummy vars and keep the class label of interest
+levels(lcdf$loan_status)
+dylcdf <- class2ind(lcdf$loan_status, drop2nd = FALSE)
+# and then decide which one to keep
+colcdf <- dylcdf [ , 1]# or,fplcdf <- dycldf [ , 2]  
+
+#Training, test subsets
+dxlcdfTrn <- dxlcdf[trnIndex,]
+colcdfTrn <- colcdf[trnIndex]
+dxlcdfTst <- dxlcdf[-trnIndex,]
+colcdfTst <- colcdf[-trnIndex]
+dxTrn <- xgb.DMatrix(subset(dxlcdfTrn, select=-c(annRet, actualTerm, actualReturn, total_pymnt)), label=colcdfTrn)
+dxTst <- xgb.DMatrix( subset( dxlcdfTst,select=-c(annRet, actualTerm, actualReturn, total_pymnt)), label=colcdfTst)
+
+
+#use cross-validation on training dataset to determine best model
+xgbParam <- list (
+max_depth = 4, eta = 0.01,
+objective = "binary:logistic",
+eval_metric="error", eval_metric = "auc")
+xgb_lscv <- xgb.cv( xgbParam, dxTrn, nrounds = 10, nfold=10, early_stopping_rounds = 10 )
+#best iteration
+xgb_lscv$best_iteration
+# or for the best iteration based on performance measure (among those specified in xgbParam)
+best_cvIter <- which.max(xgb_lscv$evaluation_log$test_auc_mean)
+
+#best model
+xgb_lsbest <- xgb.train(xgbParam, dxTrn, nrounds = xgb_lscv$best_iteration)
+
+```
+
+## Combining predictions on ranger RF models
+
+```{r Combining ranger models}
+
+#Loan Status Model RF
+
+rpredTst<-predict(rgModel1, lcdfTst)
+scoreTst_FP <- rpredTst$predictions[,"Fully Paid"]
+
+prPerfRF <- data.frame(scoreTst_FP)
+prRetPerfRF <- cbind(prPerfRF, status=lcdfTst$loan_status, grade=lcdfTst$grade, actRet=lcdfTst$actualReturn, actTerm = lcdfTst$actualTerm)
+prRetPerfRF <- prRetPerfRF %>% mutate(decile = ntile(-scoreTst_FP, 10))
+prRetPerfRF %>% group_by(decile) %>% summarise(count=n(), numDefaults=sum(status=="Charged Off"), avgActRet=mean(actRet),
+minRet=min(actRet), maxRet=max(actRet), avgTer=mean(actTerm), totA=sum(grade=="A"), totB=sum(grade=="B" ), totC=sum(grade=="C"),
+totD=sum(grade=="D"), totE=sum(grade=="E"), totF=sum(grade=="F") )
+
+
+# Actual Return Model RF
+predrfRet <- predict(rfModel_Ret, lcdfTst)
+predrfRet_Tst <- lcdfTst %>% select(grade, loan_status, actualTerm, actualReturn, int_rate) %>%
+mutate( predrfRet=predrfRet$predictions)
+predrfRet_Tst <- predrfRet_Tst %>% mutate(tile=ntile(-predrfRet, 10))
+predrfRet_Tst %>% group_by(tile) %>% summarise(count=n(), avgPredRet=mean(predrfRet),
+numDefaults=sum(loan_status=="Charged Off"), avgActRet=mean(actualReturn), minRet=min(actualReturn),
+maxRet=max(actualReturn), avgTer=mean(actualTerm), totA=sum(grade=="A"), totB=sum(grade=="B" ),
+totC=sum(grade=="C"), totD=sum(grade=="D"), totE=sum(grade=="E"), totF=sum(grade=="F") )
+
+
+#Combine both models using RF
+
+d=1
+pRetSc <- predrfRet_Tst %>% mutate(poScore=scoreTst_FP) #score scoreTst_rf_ls is from predicting loan_status. predrfRet_Tst is predicting actual return
+pRet_d <- pRetSc %>% filter(tile<=d)
+pRet_d<- pRet_d %>% mutate(tile2=ntile(-poScore, 20))
+pRet_d %>% group_by(tile2) %>% summarise(count=n(), avgPredRet=mean(predrfRet),
+numDefaults=sum(loan_status=="Charged Off"), avgActRet=mean(actualReturn), minRet=min(actualReturn),
+maxRet=max(actualReturn), avgTer=mean(actualTerm), totA=sum(grade=="A"), totB=sum(grade=="B" ),
+totC=sum(grade=="C"), totD=sum(grade=="D"), totE=sum(grade=="E"), totF=sum(grade=="F") )
+
+```
+
+We first start by combining the predictions with Loan Status and Actual Returns models, and then we took the top decile from the combined models and created a new table from it. It turns out that the combined model performs better than the two original ones individually.
+
+The model managed to differentiate 2431 loans from the lower grades (mostly C-E) with highest returns (averaged at 7%), much higher than that of the loan status model (4%). However, we need to avoid the abundance of defaults in this top decile from Actual Return prediction. 
+
+By further dividing this decile into 20 deciles, and then sorting them in decending order of their loan status prediction score, we can isolate the loans with the highest probability of being paid in the top deciles. The resulting table allows us to identify 122 loans with average predicted return at around 7.4% with only 10 defaults.
+
+Although our model does not boast the highest possible accuracy, we can see that as we go down the deciles at the last table, the number of defaults go up significantly from 10 to 38 at the last deciles. 
+
+## Combining predictions on XGB Models
+
+```{r Combining XGB Models}
+
+#Predicting loan status using XGB
+
+xpredTst<-predict(xgb_lsbest, dxTst)
+
+scoreTst_xgb_ls <- lcdfTst %>% select(grade, loan_status, actualReturn, actualTerm, int_rate) %>% mutate(score=xpredTst)
+
+scoreTst_xgb_ls <- scoreTst_xgb_ls %>% mutate(tile=ntile(-score, 10))
+
+scoreTst_xgb_ls %>% group_by(tile) %>% summarise(count=n(), avgSc=mean(score), numDefaults=sum(loan_status=="Charged Off"),
+avgActRet=mean(actualReturn), minRet=min(actualReturn), maxRet=max(actualReturn), avgTer=mean(actualTerm), totA=sum(grade=="A"),
+totB=sum(grade=="B" ), totC=sum(grade=="C"), totD=sum(grade=="D"), totE=sum(grade=="E"), totF=sum(grade=="F") )
+
+#Predicting Actual Return using XGB
+
+xpredTst_ret<-predict(xgb_lsbest_ret, xgb_test)
+predXgbRet_Tst <- lcdfTst %>% select(grade, loan_status, actualReturn, actualTerm, int_rate) %>%
+mutate( predXgbRet=xpredTst_ret)
+predXgbRet_Tst <- predXgbRet_Tst %>% mutate(tile=ntile(-predXgbRet, 10))
+predXgbRet_Tst %>% group_by(tile) %>% summarise(count=n(), avgPredRet=mean(predXgbRet),
+numDefaults=sum(loan_status=="Charged Off"), avgActRet=mean(actualReturn), minRet=min(actualReturn),
+maxRet=max(actualReturn), avgTer=mean(actualTerm), totA=sum(grade=="A"), totB=sum(grade=="B" ),
+totC=sum(grade=="C"), totD=sum(grade=="D"), totE=sum(grade=="E"), totF=sum(grade=="F") )
+
+#Combining both models
+
+
+d=1
+pRetSc_xgb <- predXgbRet_Tst %>% mutate(poScore=scoreTst_xgb_ls$score)
+#score scoreTst_xgb_ls is from predicting loan_status. predXgbRet_Tst is predicting actual return
+
+pRet_d_xgb <- pRetSc_xgb %>% filter(tile<=d)
+pRet_d_xgb <- pRet_d_xgb %>% mutate(tile2=ntile(-poScore, 20))
+pRet_d_xgb %>% group_by(tile2) %>% summarise(count=n(), avgPredRet=mean(xpredTst_ret),
+numDefaults=sum(loan_status=="Charged Off"), avgActRet=mean(actualReturn), minRet=min(actualReturn),
+maxRet=max(actualReturn), avgTer=mean(actualTerm), totA=sum(grade=="A"), totB=sum(grade=="B" ),
+totC=sum(grade=="C"), totD=sum(grade=="D"), totE=sum(grade=="E"), totF=sum(grade=="F") )
+
+
+```
+
+We followed the same method to combine the predictions of both XGB models.
+
+The combined XGB models managed to differentiate loans from the lower grades with minimum defaults. The combined models did better than the individual models:
+- The Loan Status model alone was able to minimize defaults on the top deciles but only has 3.8% average actual return.
+- The Actual Return model alone managed to gather an average actual return of 6.6% (much higher than the Loan Status prediction), in the expense of an overwhelming amount of defaults (464 loans).
+
+We further disected this top decile into 20 new deciles, and sort them by their probability of being fully paid (score from the loan status model).
+
+The top 122 loans only has 11 defaults with average actual return of 6.2%. The combined deciles allowed us to focus on the top 122 loans with the minimum defaults which present an investment opportunity with comparatively lower risk with good actual returns that are better than what we saw in individual models. As we go down the 20 deciles, we can see that the number of defaults gradually goes up to 42 out of 122 loans. This means that our model has predictive capabilities, despite its shortcomings.
+
+## Combining predictions on GLM Models
+
+```{r Combining glm models}
+
+# Loan Status Decile with glm
+xDTst<-lcdfTst %>% select(-loan_status, -actualTerm, -annRet, -actualReturn, -total_pymnt)
+
+glmPredls_Tst=predict(glmlsw_cv,data.matrix(xDTst), s="lambda.min", type="response" )
+
+preds_glm_Tst <- prediction(glmPredls_Tst, lcdfTst$loan_status, label.ordering = c("Charged Off", "Fully Paid"))
+
+scoreTst_glm_ls <- lcdfTst %>% select(grade, loan_status, actualReturn, actualTerm, int_rate) %>% mutate(score=glmPredls_Tst)
+
+scoreTst_glm_ls <- scoreTst_glm_ls %>% mutate(tile=ntile(-score, 10))
+
+scoreTst_glm_ls %>% group_by(tile) %>% summarise(count=n(), avgpredRet=mean(score), numDefaults=sum(loan_status=="Charged Off"),
+avgActRet=mean(actualReturn), minRet=min(actualReturn), maxRet=max(actualReturn), avgTer=mean(actualTerm), totA=sum(grade=="A"),
+totB=sum(grade=="B" ), totC=sum(grade=="C"), totD=sum(grade=="D"), totE=sum(grade=="E"), totF=sum(grade=="F") )
+
+
+# Actual Return Decile with glm
+glmPred_Tst_ret <- predict(glmRet_cv, data.matrix(lcdfTst %>% select(-loan_status, -actualTerm, -annRet, -actualReturn, -total_pymnt)),s="lambda.min")
+predRet_Tst_glm <- lcdfTst %>% select(grade, loan_status, actualReturn, actualTerm, int_rate) %>% mutate(predRet= glmPred_Tst_ret)
+
+predRet_Tst_glm <- predRet_Tst_glm %>% mutate(tile=ntile(-predRet, 10))
+
+predRet_Tst_glm %>% group_by(tile) %>% summarise(count=n(), avgpredRet=mean(predRet), numDefaults=sum(loan_status=="Charged Off"),
+avgActRet=mean(actualReturn), minRet=min(actualReturn), maxRet=max(actualReturn), avgTer=mean(actualTerm), totA=sum(grade=="A"),
+totB=sum(grade=="B" ), totC=sum(grade=="C"), totD=sum(grade=="D"), totE=sum(grade=="E"), totF=sum(grade=="F") )
+
+
+d=1
+pRetSc_glm <- predRet_Tst_glm %>% mutate(poScore=scoreTst_glm_ls$score) #score scoreTst_glm_ls is from predicting loan_status. predRet_Tst_glm is predicting actual return
+
+pRet_d_glm <- pRetSc_glm %>% filter(tile<=d)
+pRet_d_glm <- pRet_d_glm %>% mutate(tile2=ntile(-poScore, 20))
+pRet_d_glm %>% group_by(tile2) %>% summarise(count=n(), avgPredRet=mean(glmPred_Tst_ret),
+numDefaults=sum(loan_status=="Charged Off"), avgActRet=mean(actualReturn), minRet=min(actualReturn),
+maxRet=max(actualReturn), avgTer=mean(actualTerm), totA=sum(grade=="A"), totB=sum(grade=="B" ),
+totC=sum(grade=="C"), totD=sum(grade=="D"), totE=sum(grade=="E"), totF=sum(grade=="F") )
+
+
+```
+We pretty much saw similar trend in case of GLM as what we saw in xgb  and Ranger. Model where loan status was target variable we saw low number of defaults(79) but relatively very low actual return(4.2%) whereas the model with Actual return as target variable had higher average actual return of 7.3 percent but it at a price of higher number of defaults (449) which is actually in line with our expectations.
+
+Following the methods that we applied for RF and XGboost, we now combine our GLM models. Below is the results of our individual models:
+- the top decile of the loan status prediction managed to identify the safest loans, with only 79 defaults out of 2431. However, the average actual return is so only 4.2%
+- the prediction from our Actual Return model managed to predict the highest average actual return of 7.3%, while failing to separate the defaults from non-defaults (default of 449 loans).
+
+We partitioned the top decile of the Actual Return prediction into 20 new deciles. We also added the score of loan status prediction and sort the new 20 deciles based on this score. The resulting combination decile managed to identify the 2 top deciles (122 loans in each) with 7.1% and 7.9% average actual return with only 6 and 7 defaults each. So far, the glm model has been the best performer for combination predictions.
+
+# Q4: Modelling with lower grade loans
+
+Another approach to get the best returns from fully paid loans is by building a model to predict loan status on the lower grade loans. We will compare the results with the combination predictions above.
+
+## Modelling from lower loan grades with Ranger
+
+```{r Modelling from lower loan grades with Ranger}
+
+
+lg_lcdfTst<-lcdfTst %>% filter(grade=='C'| grade=='D'| grade== 'E'| grade== 'F'| grade== 'G')
+lg_lcdfTrn<-lcdfTrn %>% filter(grade=='C'| grade=='D'| grade== 'E'| grade== 'F'| grade== 'G')
+
+rf_M1_lg <- ranger(loan_status ~., data=subset(lg_lcdfTrn, select=-c(annRet, actualTerm, actualReturn)), num.trees =200,
+probability=TRUE, importance='permutation')
+lg_scoreTstRF <- lg_lcdfTst %>% select(grade, loan_status, actualReturn, actualTerm, int_rate) %>%
+mutate(score=(predict(rf_M1_lg,lg_lcdfTst))$predictions[,"Fully Paid"])
+
+lg_scoreTstRF <- lg_scoreTstRF %>% mutate(tile=ntile(-score, 10))
+
+lg_scoreTstRF %>% group_by(tile) %>% summarise(count=n(), avgSc=mean(score),
+numDefaults=sum(loan_status=="Charged Off"), avgActRet=mean(actualReturn), minRet=min(actualReturn),
+maxRet=max(actualReturn), avgTer=mean(actualTerm), totA=sum(grade=="A"), totB=sum(grade=="B" ),
+totC=sum(grade=="C"), totD=sum(grade=="D"), totE=sum(grade=="E"), totF=sum(grade=="F") )
+```
+
+Our RF model on lower grade loans is able to identify the loans which are most likely to be fully paid (15 defaults out of 1112 loans) while maintaining a high average actual return of 8.9%.
+
+```{r Modelling from lower loan grades with glm}
+
+xDTrn_lg<-lg_lcdfTrn %>% select(-loan_status, -actualTerm, -annRet, -actualReturn, -total_pymnt)
+yTrn_lg<-factor(if_else(lg_lcdfTrn$loan_status=="Fully Paid", '1', '0') )
+wts_lg <- if_else(yTrn_lg == 0, 1-sum(yTrn_lg == 0)/length(yTrn_lg), 1-sum(yTrn_lg == 1)/length(yTrn_lg))
+
+glmlsw_cv_lg<- cv.glmnet(data.matrix(xDTrn_lg), yTrn_lg, family= "binomial", weights = wts_lg, alpha = 1)
+
+xDTst_lg<-lg_lcdfTst %>% select(-loan_status, -actualTerm, -annRet, -actualReturn, -total_pymnt)
+
+glmPredls_Tst_lg=predict(glmlsw_cv_lg,data.matrix(xDTst_lg), s="lambda.min", type="response" )
+
+preds_glm_Tst_lg <- prediction(glmPredls_Tst_lg, lg_lcdfTst$loan_status, label.ordering = c("Charged Off", "Fully Paid"))
+
+scoreTst_glm_ls_lg <- lg_lcdfTst %>% select(grade, loan_status, actualReturn, actualTerm, int_rate) %>% mutate(score=glmPredls_Tst_lg)
+
+scoreTst_glm_ls_lg <- scoreTst_glm_ls_lg %>% mutate(tile=ntile(-score, 10))
+
+scoreTst_glm_ls_lg %>% group_by(tile) %>% summarise(count=n(), avgpredRet=mean(score), numDefaults=sum(loan_status=="Charged Off"),
+avgActRet=mean(actualReturn), minRet=min(actualReturn), maxRet=max(actualReturn), avgTer=mean(actualTerm), totA=sum(grade=="A"),
+totB=sum(grade=="B" ), totC=sum(grade=="C"), totD=sum(grade=="D"), totE=sum(grade=="E"), totF=sum(grade=="F") )
+
+
+```
+
+Our GLM model on lower grade loans is doing less compared to the our RF model on lower grade loans. However, its top decile has a good average actual return, which is 7.3% with only 125 defaults out of 1112 loans.
+
+```{r Modelling from lower loan grades with xgboost}
+
+lg_lcdf<-lcdf %>% filter(grade=='C'| grade=='D'| grade== 'E'| grade== 'F'| grade== 'G')
+
+nr_lg=nrow(lg_lcdf)
+trnIndex_lg = sample(1:nr_lg, size = round(0.7*nr_lg), replace=FALSE)
+lcdfTrn_lg=lg_lcdf[trnIndex_lg,]
+lcdfTst_lg = lg_lcdf[-trnIndex_lg,]
+
+dumVar_lg<-dummyVars(~.,data=lg_lcdf %>% select(-loan_status))
+dxlcdf_lg<- predict(dumVar_lg,lg_lcdf)
+
+# for loan_status, check levels and convert to dummy vars and keep the class label of interest
+levels(lg_lcdf$loan_status)
+dylcdf_lg <- class2ind(lg_lcdf$loan_status, drop2nd = FALSE)
+# and then decide which one to keep
+colcdf_lg <- dylcdf_lg [ , 1]# or,fplcdf <- dycldf [ , 2]  
+
+
+#Training, test subsets
+dxlcdfTrn_lg <- dxlcdf_lg[trnIndex_lg,]
+colcdfTrn_lg <- colcdf_lg[trnIndex_lg]
+dxlcdfTst_lg <- dxlcdf_lg[-trnIndex_lg,]
+colcdfTst_lg <- colcdf_lg[-trnIndex_lg]
+dxTrn_lg <- xgb.DMatrix(subset(dxlcdfTrn_lg, select=-c(annRet, actualTerm, actualReturn, total_pymnt)), label=colcdfTrn_lg)
+dxTst_lg <- xgb.DMatrix( subset( dxlcdfTst_lg,select=-c(annRet, actualTerm, actualReturn, total_pymnt)), label=colcdfTst_lg)
+
+
+#use cross-validation on training dataset to determine best model
+xgbParam_lg <- list (
+max_depth = 4, eta = 0.01,
+objective = "binary:logistic",
+eval_metric="error", eval_metric = "auc")
+xgb_lscv_lg <- xgb.cv( xgbParam_lg, dxTrn_lg, nrounds = 10, nfold=10, early_stopping_rounds = 10 )
+#best iteration
+xgb_lscv_lg$best_iteration
+# or for the best iteration based on performance measure (among those specified in xgbParam)
+best_cvIter_lg <- which.max(xgb_lscv_lg$evaluation_log$test_auc_mean)
+
+#best model
+xgb_lsbest_lg <- xgb.train(xgbParam_lg, dxTrn_lg, nrounds = xgb_lscv_lg$best_iteration)
+
+xpredTst_lg<-predict(xgb_lsbest_lg, dxTst_lg)
+
+scoreTst_xgb_ls_lg <- lcdfTst_lg %>% select(grade, loan_status, actualReturn, actualTerm, int_rate) %>% mutate(score=xpredTst_lg)
+
+scoreTst_xgb_ls_lg <- scoreTst_xgb_ls_lg %>% mutate(tile=ntile(-score, 10))
+
+scoreTst_xgb_ls_lg %>% group_by(tile) %>% summarise(count=n(), avgSc=mean(score), numDefaults=sum(loan_status=="Charged Off"),
+avgActRet=mean(actualReturn), minRet=min(actualReturn), maxRet=max(actualReturn), avgTer=mean(actualTerm), totA=sum(grade=="A"),
+totB=sum(grade=="B" ), totC=sum(grade=="C"), totD=sum(grade=="D"), totE=sum(grade=="E"), totF=sum(grade=="F") )
+
+
+```
+
+Our XGBoost model on lower grade loans is doing less compared to the our RF and GLM models on lower grade loans. However, its top decile has a decent average actual return of 6.6% with only 144 defaults out of 1112 loans. As we go down the deciles, we encounter more defaults.
+
+### In comparing RF to RF, GLM to GLM, XGB to XGB:
+1)	Ranger Model seemed be working exceptionally well lower grade loans data. If we compare the top deciles of the two different Ranger models, one with lower grades loans and the other that contains all the grades: The Lower grade loan data model seems to be working better in all aspects be it default rate or the average actual return. Investing in lower grades loans seems to be a better choice if we go by the ranger model.
+2)	Comparison of xgb model with lower grade loan data with its counterpart that contains loans from all grade is pretty much in line with our expectations. Lower grade loan model has higher defaults but also higher actual average returns.
+3)	Comparison of glm model with lower grade loan data with its counterpart that contains loans from all grade is pretty much in line with our expectations. Lower grade loan model has higher defaults but also higher actual average returns.
+
+### Profit analysis for best investment approach
+
+Now we will apply all the models through the profit analysis. Suppose we have to decide which top decile is the best to invest on (using what model?), and we are planning to invest $100 in every loan. The cost of investing in a Charged Off loan is $35, as was explained in our previous assignment. The return of a loan will follow the percentage of average actual return for that decile.
+
+We would recommend the following models to use, because of their best profit calculation:
+1. Use the RF model on lower grade loans, which boasts the highest profit.
+2. Use the combined GLM models, and invest in the top 122 loans.
+
+The complete tabulation for investment approaches using the best models can be found in the table below:
+
+```{r echo=FALSE}
+read.csv("Assignment 2_ProfitTabulation.csv")
+```

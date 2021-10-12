@@ -1,0 +1,636 @@
+---
+title: "IDS 572 - Assignment 1 Part A"
+author: Joseline Luvena Tanujaya, Sweta Bansal, Vibhanshu
+output: html_document
+---
+```{r include=FALSE}
+
+library(tidyverse)
+library(lubridate)
+```
+
+
+## Assignment 1 - Part A
+
+```{r message=FALSE, include=FALSE}
+
+lcdf <- read_csv('lcDataSample5m.csv')
+```
+
+
+
+2A(i) What is the proportion of defaults (‘charged off’ vs ‘fully paid’ loans) in the data?
+How does default rate vary with loan grade? Does it vary with sub-grade? And is this what you would expect, and why?
+
+
+
+2A(i) Analysis:
+
+We have presented combination of tables and bar graph on answer this question. The proportion of charged off and paid off has been presented in first table and bar graph is used to present how default rate varies by grade. Below is our analysis:
+
+The default rate increases as grade gets worse from A to G. The same pattern holds true for sub-grade. With the exception of G3 that breaks the pattern (Outlier), where the Charged Off rate is similar to those of D4 or D5. This aligns with our expectations. Grades are assigned based on the borrower's likelihood to pay their debt.
+
+
+
+```{r}
+
+#Below is the proportion of chargedoff and fully paid loans
+lcdf %>% group_by(loan_status) %>% tally()
+loanstatus_summary <- table(lcdf$loan_status)
+
+# Removing the values for loan_status other than "Fully Paid' and "Charged Off"? there is one entry for "current"
+lcdf <- lcdf %>% filter(loan_status == "Fully Paid" | loan_status == "Charged Off")
+
+#Group loan status by loan grade to see variation within grade
+lcdf %>% group_by(grade, loan_status) %>% tally()
+
+#Percentage within grade and sub grade:
+prop.table(table(lcdf$loan_status, lcdf$grade),margin = 2) #proportion by grade
+prop.table(table(lcdf$loan_status, lcdf$sub_grade),margin = 2) #proportion by sub_grade
+
+#The default rate by graph
+graph <- lcdf %>% group_by(grade) %>% summarise(Count = n(), DefaultRate = (sum(loan_status
+== "Charged Off")/Count)*100)
+
+ggplot(graph) + aes(x = grade, y = DefaultRate, fill = grade) + geom_bar(stat =
+"identity") + xlab("Grade") + ylab("Default Rate") + ggtitle("Default Rate by Grade")
+
+
+```
+
+
+
+
+
+2A(ii) How many loans are there in each grade? And do loan amounts vary by grade? Does interest rate for loans vary with grade, subgrade? Look at the average, standard-deviation, min and max of interest rate by grade and subgrade. Is this what you expect, and why?
+
+
+
+2A (ii) Analysis:
+
+We have used tables to present number of loans. we have also presented average interest rates, min, max and standard deviation. there are different tables for analysis at grade level and subgrade. Further to that we have created bar chart to present average loan amount by grade. In order to present interest rate, boxplot and scatter plot has been used for analysis at grade and subgade level respectively.  Below is our overall observations: 
+
+Loan amounts vary by grade but there is no pattern. The difference between neighboring grades is within 20%. 
+As grade/sub grade goes worse from A1 to G5, which aligns with our expectations, interest rate increases with higher default rates (riskier investments). 
+Looking at the min and max values Within sub grades, we can see that there are loans that break this pattern (for example loans in B4 have smaller interest rate than A4).
+
+
+```{r}
+
+# By grade:
+summarise_by_grade <- lcdf %>% group_by(grade) %>% summarise(nLoans=n(), defaults=sum(loan_status=="Charged Off"), avgInterest= mean(int_rate), stdInterest=sd(int_rate),minInterest=min(int_rate), maxInterest=max(int_rate), avgLoanAMt=mean(loan_amnt))
+summarise_by_grade
+
+# By sub-grade:
+lcdf %>% group_by(sub_grade) %>% summarise(nLoans=n(), defaults=sum(loan_status=="Charged Off"), avgInterest= mean(int_rate), stdInterest=sd(int_rate),minInterest=min(int_rate), maxInterest=max(int_rate), avgLoanAMt=mean(loan_amnt))
+
+ggplot(lcdf) + aes(x = grade, y = loan_amnt, fill = grade) + geom_boxplot() + xlab("Grade") + ylab("Loan Amount") + ggtitle("Loan Amount Variation by Grade")
+
+ggplot(lcdf) + aes(x = grade, y = int_rate, fill = grade) + geom_boxplot() + xlab("Grade") + ylab("Interest Rate") + ggtitle("Interest Rate Variation by Grade")
+
+ggplot(lcdf) + aes(x = sub_grade, y = int_rate, colour= sub_grade) + geom_point() + xlab("Sub Grade") + ylab("Interest Rate") + ggtitle("Interest Rate Variation by Sub Grade") + theme(axis.text.x = element_text(angle = 60, hjust = 1))
+```
+
+
+
+
+2A(iii) What are people borrowing money for (purpose)? Examine how many loans, average amounts, etc. by purpose? And within grade? Do defaults vary by purpose?
+
+2a iii Analysis
+
+All the purpose of the loans has been listed in the tables below along with number of loans for each category and average loan amount. Another tables has been used to present number of loans and average loan amount for each combination of purpose and grade. Later we have used bar graph and box plot to present number of loans and average loan amount with purpose on the x axis. Below is our overall observations: 
+
+People are mostly borrowing for debt consolidation. Default does rates do vary by purpose. The highest default rate is on renewable energy, small business, and moving.
+
+
+
+```{r}
+
+lcdf %>% group_by(purpose) %>% summarise(nLoans=n(), avgLoanAMt=mean(loan_amnt)) 
+
+lcdf_purpose_1 <- lcdf %>% group_by(grade) %>% summarise(nLoans=n(), avgLoanAMt=mean(loan_amnt))
+
+lcdf %>% group_by(grade, purpose) %>% summarise(nLoans=n(), avgLoanAMt=mean(loan_amnt))
+
+# find the distribution of grades within purposes:
+table(lcdf$purpose, lcdf$loan_status)
+prop.table(table(lcdf$purpose, lcdf$loan_status), 1) # % by purpose
+prop.table(table(lcdf$purpose, lcdf$loan_status), 2) # % by loan status
+
+#The loan count by purpose
+ggplot(lcdf, aes(x = purpose, fill = purpose)) + geom_bar(width = 0.5) + xlab("Purpose") +
+ylab("Loan Count") + theme(axis.text.x = element_text(angle = 60, hjust = 1)) + ggtitle("Loan Count by Purpose")
+
+#The loan amount by purpose
+ggplot(lcdf) + aes(x = purpose, y = loan_amnt, fill = purpose) + geom_boxplot() + xlab("purpose") + ylab("Loan Amount") + ggtitle("Loan Amount by Purpose") + theme(axis.text.x = element_text(angle = 60, hjust = 1))
+
+#The loan count by grade
+ggplot(lcdf, aes(x = grade, fill = grade)) + geom_bar(width = 0.5) + xlab("Grade") +
+ylab("Loan Count") + theme(axis.text.x = element_text(angle = 60, hjust = 1)) + ggtitle("Loan Count by Grade")
+
+#The loan amount by grade
+ggplot(lcdf) + aes(x = grade, y = loan_amnt, fill = grade) + geom_boxplot() + xlab("Grade") + ylab("Loan Amount") + ggtitle("Loan Amount by Grade") + theme(axis.text.x = element_text(angle = 60, hjust = 1))
+
+#The default rate by purpose
+lcdf_by_purpose <- lcdf %>% group_by(purpose) %>% summarise(Count = n(), DefaultRate = (sum(loan_status
+== "Charged Off")/Count)*100)
+
+ggplot(lcdf_by_purpose) + aes(x = purpose, y = DefaultRate, fill = purpose) + geom_bar(stat =
+"identity") + xlab("Purpose") + ylab("Default Rate") + ggtitle("Default Rate by Purpose") +theme(axis.text.x = element_text(angle = 60, hjust = 1))
+
+```
+
+
+
+
+
+2A(iv) For loans which are fully paid back, how does the time-to-full-payoff vary? For this, calculate
+the ‘actual term’ (issue-date to last-payment-date) for all loans. How does this actual-term vary by loan grade (a box-plot can help visualize this)
+
+
+
+2A(iv) Analysis:
+The Average loan term by grade along with min and max has been presented in the table. we have also used boxplot to present actual term by grade for fully paid back loans. Below is our overall observation:
+
+
+For fully paid back loans, the average loans are paid within 2.5 years.
+There are no significant differences of Actual Terms between grades. However, on average people pay back all of the amount below 800 days. We can conclude that if a loan is not paid after 800 days, it is less likely to be paid.
+
+
+
+
+```{r}
+#Term of the loan is the duration between the last-payment-date and the loan issue-date.
+# check the format of these two columns with date values
+head(lcdf[, c("last_pymnt_d", "issue_d")])
+
+# change the character type to date:
+lcdf$last_pymnt_d<-paste(lcdf$last_pymnt_d, "-01", sep = "")
+# convert this character to a date type variable
+lcdf$last_pymnt_d<-parse_date_time(lcdf$last_pymnt_d,  "myd")
+
+# for defaulted loans, set the actual-term at 3 years.
+lcdf$actualTerm <- ifelse(lcdf$loan_status=="Fully Paid", as.duration(lcdf$issue_d  %--% lcdf$last_pymnt_d)/dyears(1), 3)
+
+lcdf_paid <- subset(lcdf, loan_status == "Fully Paid")
+#str(lcdf_paid)
+lcdf_paid_days <- lcdf_paid %>% group_by(grade) %>% summarise(nLoans=n(), actTerm= (mean(actualTerm)*365)) 
+
+# sd(lcdf_paid$actTerm)
+library(ggplot2)
+ggplot(lcdf_paid, aes(x=grade, y=actualTerm, fill=grade)) + 
+    geom_boxplot() + xlab("Grade") + ylab("Actual Term (years)") + ggtitle("Actual Term by Grade")
+
+lcdf_paid %>% group_by(grade) %>% summarise(avgActTerm= mean(actualTerm), minActTerm=min(actualTerm), maxActTerm=max(actualTerm))
+
+```
+
+
+
+2A(v) Code Chunk:
+Calculate the annual return. Show how you calculate the percentage annual return.
+Is there any return from loans which are ‘charged off’? Explain. How does return from charged off loans vary by loan grade?
+Compare the average return values with the average interest_rate on loans – do you notice any
+differences, and how do you explain this?
+How do returns vary by grade, and by sub-grade.
+If you wanted to invest in loans based on this data exploration, which loans would you invest in?
+
+
+
+2A (V) Analysis:
+
+
+Actual Annual return has been presented with grade and subgrade as separate tables. Further to that we created separate data frame for charged off loans. Secondly, we have presented the information regarding returns and how it varies with grade and subgrade.lastly, presented summary for charge off loans that includes average return and average interest rates. Below are the observations we made:
+
+
+Some charged off loans are paid back partially. Some charged off loans also make profit (interest rates can be so high that the investors end up making money out of defaulted loans).
+
+The losses vary a little bit by grade, which is roughly normally distributed (less losses on grade A and grade G). They typically range between 10-12%.
+
+The highest average return is seen on grade F and G, because even though the default rate is high, the interest rate is high enough that the investors make more money on these loans than of other grades. By sub grade, return also increase as sub-grade goes worse from A1-G5. The highest average return is found on F4.
+
+Suggestions which loans to make:
+1) For highest return, we suggest to take F4, which average return is 8.1% but with default risk of 32%.
+
+2) If safety is the priority, we suggest to take A1 with default risk of 3.1%, the lowest of all, and annual return of 3.6%. The return to risk ratio is 113%, the most optimum return considering the default rate. 
+
+3) Our personal suggestion is to try loans at sub-grade G3, where the default rate is an outlier (much lower than its peers), and offers the second-highest total return of all.
+
+
+```{r}
+#Based on actual term, the actual annual return is
+lcdf$actualReturn <- ifelse(lcdf$actualTerm>0, ((lcdf$total_pymnt -lcdf$funded_amnt)/lcdf$funded_amnt)*(1/lcdf$actualTerm), 0)
+
+
+
+lcdf %>% group_by(grade) %>% summarise(avgReturn= mean(actualReturn), avgInt= mean(int_rate)/100)
+
+lcdf %>% group_by(sub_grade) %>% summarise(avgReturn= mean(actualReturn), avgInt= mean(int_rate)/100)
+
+
+
+#Actual Return by Grade (All Status)
+lcdf_all_return_grade<-lcdf %>% group_by(grade) %>% summarise(nLoans=n(), actRet= (mean(actualReturn)), intRate=mean(int_rate))
+
+ggplot(lcdf_all_return_grade) + aes(x = grade, y = actRet, fill = grade) + geom_bar(stat ="identity") + xlab("Grade") + ylab("Return from All") + ggtitle("Actual Return from All Loans by Grade") +theme(axis.text.x = element_text(angle = 60, hjust = 1))
+
+#Actual Return by Sub Grade (All Status)
+lcdf_all_return_subgrade<-lcdf %>% group_by(sub_grade) %>% summarise(nLoans=n(), actRet= (mean(actualReturn)), intRate=mean(int_rate))
+
+ggplot(lcdf_all_return_subgrade) + aes(x = sub_grade, y = actRet, fill = sub_grade) + geom_bar(stat ="identity") + xlab("Sub Grade") + ylab("Return from All") + ggtitle("Actual Return from All Loans by Sub Grade") +theme(axis.text.x = element_text(angle = 60, hjust = 1))
+
+
+
+
+#return from loans which are ‘charged off’? How does return from charged-off loans vary by loan grade?
+lcdf_charged_off <- subset(lcdf, loan_status == "Charged Off")
+# profit for charged off loans (if any)
+lcdf_charged_off %>% summarise(retValue=total_pymnt-funded_amnt) %>% filter(retValue > 0)
+# any return from charged off loans
+lcdf_charged_off %>% filter(total_pymnt > 0) %>% group_by(grade) %>% summarise(totPayment=mean(total_pymnt))
+
+lcdf_charged_off %>% group_by(grade) %>% summarise(nLoans=n(), actRet= (mean(actualReturn)))
+
+
+# Calculate total return
+lcdf$totReturn <- ifelse(lcdf$actualTerm>0, ((lcdf$total_pymnt -lcdf$funded_amnt)/lcdf$funded_amnt), 0) #not annual return
+
+(lcdf_chargedoff_return<-lcdf_charged_off %>% group_by(grade) %>% summarise(nLoans=n(), actRet= (mean(actualReturn)), intRate=mean(int_rate)))
+
+lcdf %>% group_by(sub_grade) %>% summarise(nLoans=n(), annRet=mean(actualReturn), TotRet=mean(totReturn), defaults=sum(loan_status=="Charged Off"), defRate=(sum(loan_status=="Charged Off")/n()), return_to_risk_ratio=(mean(actualReturn)/(sum(loan_status=="Charged Off")/n())))
+
+#graphing code
+#Actual Return from Charged Off Loans by Grade
+ggplot(lcdf_chargedoff_return) + aes(x = grade, y = actRet, fill = grade) + geom_bar(stat ="identity") + xlab("Grade") + ylab("Return from Charged Off") + ggtitle("Actual Return from Charged Off Loans by Grade") +theme(axis.text.x = element_text(angle = 60, hjust = 1))
+
+```
+
+
+
+
+
+
+2A(VI): (v) Generate some (at least 3) new derived attributes which you think may be useful for
+predicting default., and explain what these are?
+
+
+
+
+2A (VI) Analysis: 
+
+Derived attribute 1: proportion of satisfactory bankcard accounts.
+The ratio describes how much the person has been able to pay out of all his debts so far. The higher this number, the more likely he is going to pay out his debts.
+
+Derived attribute 2: the length of borrower's history with LC.The longer his history is, the more likely this person is going to pay for his debts (credible history), because this person has a proven track record.
+
+Derived attribute 3: ratio of openAccounts to totalAccounts. This shows how many accounts this person has managed to close off (pay back). If he has only a few account remaining, he is more likely to pay back the loan.
+
+Derived attribute 4: ratio of loan amount to annual income. This is the proportion of loan compared to his annual income. The smaller the ratio is, the more likely he is able to pay off the loan.
+
+Derived attribute 5: ratio of total current balance to annual income. 
+```{r}
+#Generate some (at least 3) new derived attributes which you think may be useful for predicting default., and explain what these are.
+lcdf %>% group_by(sub_grade) %>% summarise(nLoans=n(), annRet=mean(actualReturn), TotRet=mean(totReturn), defaults=sum(loan_status=="Charged Off"), defRate=((sum(loan_status=="Charged Off")/n())))
+
+# emp_length, change to ordinal factor
+#Consider emp_length - what are the different values, and how many examples are there for each value
+lcdf %>% group_by(emp_length) %>% tally()
+
+#convert emp_length to factor -- with factor levels ordered in a meaningful way
+lcdf$emp_length <- factor(lcdf$emp_length, levels=c("n/a", "< 1 year","1 year","2 years", "3 years" ,  "4 years",   "5 years",   "6 years",   "7 years" ,  "8 years", "9 years", "10+ years" ))
+# Note: we could have converted to factor by simply using x<-as.factor(lcdf$emp_length), but here the factor levels would be randomly arranged
+
+#in purpose, merge some categories together if they are too small by themselves
+#Look at loan purpose
+lcdf %>% group_by(purpose) %>% tally()
+# do you want to recode some categories with very few cases to "other"
+lcdf$purpose <- fct_recode(lcdf$purpose, other="wedding", other="educational", other="renewable_energy")
+
+
+#Derived attribute 1: proportion of satisfactory bankcard accounts 
+#lcdf$propSatisBankcardAccts <- ifelse(lcdf$num_bc_tl>0, lcdf$num_bc_sats/lcdf$num_bc_tl, 0)
+
+#Derived attribute 2: the length of borrower's history with LC
+lcdf$earliest_cr_line<-paste(lcdf$earliest_cr_line, "-01", sep = "")
+lcdf$earliest_cr_line<-parse_date_time(lcdf$earliest_cr_line, "myd")
+ 
+#lcdf$borrHistory <- as.duration(lcdf$earliest_cr_line %--% lcdf$issue_d) / dyears(1)
+
+#Derived attribute 3: ratio of openAccounts to totalAccounts
+#lcdf$prop_OpAccts_to_TotAccts <- ifelse(lcdf$open_acc >0, lcdf$open_acc/lcdf$total_acc, 0)
+
+#Derived attribute 4: ratio of loan amount to annual income
+#lcdf$propLoanAmt_to_AnnInc <- lcdf$loan_amnt/lcdf$annual_inc
+
+#Derived attribute 5: ratio of total current balance to annual income (leakage: tot_cur_bal)
+#lcdf$prop_CurBal_to_AnnIc <- lcdf$tot_cur_bal/lcdf$annual_inc
+
+#glimpse(lcdf)
+
+#convert all of these to factor
+lcdf <- lcdf %>% mutate_if(is.character, as.factor)
+```
+
+
+
+
+2b Missing Values
+ Are there missing values? What is the proportion of missing values in different variables?
+Explain how you will handle missing values for different variables. You should consider what he
+variable is about, and what missing values may arise from – for example, a variable
+monthsSinceLastDeliquency may have no value for someone who has not yet had a delinquency;
+what is a sensible value to replace the missing values in this case?
+Are there some variables you will exclude from your model due to missing values?
+
+
+
+2B Analysis:
+
+We have started our analysis by presenting all the columns that has NAs(missing values) and the proportion of NAs. we performed multiple steps to handle missing values: Firstly we removed the columns completely from our data frame that has all values as NAs. Secondly we removed the columns that has 60% or our above NAs because no significant analysis can be performed by using columns where majority of values are NAs.
+
+
+For rest of the columns with missing values we have used combination of mathematical techniques such as taking mean of the overall population for the given column, mode, median, max or min to replace missing values. Justification for each column has been given in the code section as comments.
+
+```{r}
+#Check NA before removal:
+colMeans(is.na(lcdf))
+
+dim(lcdf)
+#149
+#drop variables with all NAs:
+lcdf <- lcdf %>% select_if(function(x){!all(is.na(x))})
+
+dim(lcdf)
+#99 cols remaining, we dropped 50 cols
+
+#Of the columns remaining, names of columns with missing values
+names(lcdf)[colSums(is.na(lcdf))>0]
+
+#missing value proportions in each column
+colMeans(is.na(lcdf))
+# or, get only those columns where there are missing values
+colMeans(is.na(lcdf))[colMeans(is.na(lcdf))>0]
+
+#remove variables which have more than 60% missing values, because the data available is insufficient to predict missing values.
+nm<-names(lcdf)[colMeans(is.na(lcdf))>0.6]
+lcdf <- lcdf %>% select(-nm)
+
+#Impute missing values - first get the columns with missing values
+colMeans(is.na(lcdf))[colMeans(is.na(lcdf))>0]
+#summary of data in these columns
+nm<- names(lcdf)[colSums(is.na(lcdf))>0]
+summary(lcdf[, nm])
+
+#mths_since_last_delinq: has 48% missings, these pertain to no delinquincy, so replace by a value higher than the max (500) -- we will try this out and put results in a temporary dataset lcx, with the attributes that have missng values
+lcx<-lcdf[, c(nm)]
+colMeans(is.na(lcx))[colMeans(is.na(lcx))>0]
+lcx<- lcx %>% replace_na(list(mths_since_last_delinq = 500))
+
+#bc_open_to_buy, use mean because number of NA is really low (1.2%)
+lcx<- lcx %>% replace_na(list(bc_open_to_buy=mean(lcdf$bc_open_to_buy, na.rm=TRUE)))
+
+#Replace na in last_credit_pull_d with a date older than 1 year(valid period). In this case we chose 1 Jan 2015.
+lcx<- lcx %>% replace_na(list(last_credit_pull_d='01-01-2015'))
+sum(is.na(lcx$last_credit_pull_d)>0) #prove we replaced the NAs
+
+#mo_sin_old_il_acct, use mean because number of NA is really low (3.8%)
+lcx<- lcx %>% replace_na(list(mo_sin_old_il_acct=max(lcdf$mo_sin_old_il_acct, na.rm=TRUE)))
+
+#mths_since_recent_bc, use max because NA because it means the person has never opened a bankcard acc before. So we assign a number that is the longest, or way above the max.
+lcx<- lcx %>% replace_na(list(mths_since_recent_bc=max(lcdf$mths_since_recent_bc, na.rm=TRUE)))
+
+#mths_since_recent_inq, use max because NA because it means no inquiry has been made. So we assign a number that is the longest, or way above the max.
+lcx<- lcx %>% replace_na(list(mths_since_recent_inq=max(lcdf$mths_since_recent_inq, na.rm=TRUE)))
+
+#bc_util, use mean because number of NA is really low (1.2%)
+lcx<- lcx %>% replace_na(list(bc_util=mean(lcdf$bc_util, na.rm=TRUE)))
+
+#listnum_tl_120dpd_2m, use mean because number of NA is really low (2.6%)
+lcx<- lcx %>% replace_na(list(num_tl_120dpd_2m = mean(lcdf$num_tl_120dpd_2m, na.rm=TRUE)))
+
+#percent_bc_gt_75, use mean because number of NA is really low (1.2%)
+lcx<- lcx %>% replace_na(list(percent_bc_gt_75 = mean(lcdf$percent_bc_gt_75, na.rm=TRUE)))
+
+#revol_util, use mean because number of NA is really low (.04%)
+lcx<- lcx %>% replace_na(list(revol_util = mean(lcdf$revol_util, na.rm = TRUE)))
+
+#emp_length, NA means 0 experience, so replace it with < 1 year
+lcx<- lcx %>% replace_na(list(emp_length= "< 1 year"))
+
+#After trying this out on the temporary dataframe lcx, if we are sure this is what we want, we can now  replace the missing values on the lcdf dataset
+lcdf<- lcdf %>% replace_na(list(mths_since_last_delinq=500, bc_open_to_buy=mean(lcdf$bc_open_to_buy, na.rm=TRUE),  last_credit_pull_d='01-01-2015', mo_sin_old_il_acct=max(lcdf$mo_sin_old_il_acct, na.rm=TRUE), mths_since_recent_bc=max(lcdf$mths_since_recent_bc, na.rm=TRUE), mths_since_recent_inq=max(lcdf$mths_since_recent_inq, na.rm=TRUE), bc_util=mean(lcdf$bc_util, na.rm=TRUE), num_tl_120dpd_2m = mean(lcdf$num_tl_120dpd_2m, na.rm=TRUE),percent_bc_gt_75 = mean(lcdf$percent_bc_gt_75, na.rm=TRUE), revol_util = mean(lcdf$revol_util, na.rm = TRUE), emp_length= "< 1 year"))
+
+#CHECK FOR NAs AGAIN
+colMeans(is.na(lcdf))[colMeans(is.na(lcdf))>0]
+
+# The last payment date missing are from 'Charger Off' where they didn't pay at all.
+lcdf %>% filter(is.na(lcdf$last_pymnt_d)) %>% group_by(loan_status) %>% tally()
+#replace the NA in last payment date with 3 years after issue date
+#lcdf<- lcdf %>% replace_na(list(lcdf$last_pymnt_d=issue_d+years(3)))
+
+```
+
+
+
+
+3 Data Leakage
+Consider the potential for data leakage. You do not want to include variables in your model which may not be available when applying the model; that is, some data may not be available for new loans before they are funded. Leakage may also arise from variables in the data which may have been updated during the loan period (ie., after the loan is funded). Identify and explain which variables will you exclude from the model.
+
+
+Please refer to the table in appendix-1. We have list all the columns that has been removed. further we have added them into separate buckets. each bucket has the reason mentioned as the header.
+
+
+
+
+
+
+```{r}
+
+#glimpse(LCDataDictionary_6_)
+
+#Drop some other variables
+varsToRemove <- c("X1",
+                  "funded_amnt",
+                  "funded_amnt_inv",
+                  "term",
+                  "emp_title",
+                  "issue_d",
+                  "delinq_2yrs",
+                  "pymnt_plan",
+                  "title",
+                  "zip_code",
+                  "addr_state",
+                  "delinq_2yrs",
+                  "inq_last_6mths", 
+                  "mths_since_last_delinq",
+                  "open_acc",
+                  "pub_rec",
+                  "revol_bal",
+                  "revol_util",
+                  "total_acc",
+                  "out_prncp",
+                  "out_prncp_inv",
+                  "total_pymnt",
+                  "total_pymnt_inv",
+                  "total_rec_prncp",
+                  "total_rec_int",
+                  "total_rec_late_fee",
+                  "recoveries",
+                  "collection_recovery_fee",
+                  "last_pymnt_d",
+                  "last_pymnt_amnt",
+                  "last_credit_pull_d",
+                  "policy_code",
+                  "application_type",
+                  "acc_now_delinq",
+                  "tot_coll_amt",
+                  "tot_cur_bal",
+                  "hardship_flag",
+                  "disbursement_method",
+                  "debt_settlement_flag",
+                  "actualReturn",
+                  "actualTerm",
+                  "totReturn",
+                  "earliest_cr_line"
+)
+lcdf <- lcdf %>% select(-varsToRemove)
+
+```
+
+
+
+4. 
+Do a uni-variate analyses to determine which variables (from amongst those you decide to consider for the next stage prediction task) will be individually useful for predicting the dependent variable (loan_status). For this, you need a measure of relationship between the dependent variable and each of the potential predictor variables. Given loan-status as a binary dependent variable, which measure will you use? From your analyses using this measure,
+which variables do you think will be useful for predicting loan_status? (Note – if certain variables on their own are highly predictive of the outcome, it is good to ask if
+this variable has a leakage issue).
+
+
+4  Analysis
+
+We have performed Uni-variate analysis using Sapply function and calculated AUC for each column to figure out the ability of the given column to predict the loan status. we have listed the top 10 columns in there AUC scores and reason for picking them in Appendix-2 tab;e that can be found in the end of report.
+
+
+The measurement we use is AUC, because the class distribution of "Charged Off" is much less than that of "Fully Paid", and the misclassification cost of False Negatives (default loan categorized as non-default) is way higher than the cost of False Positives (non-default loan categorized as default). 
+The threshold we are using is AUC score >= 0.55, which means that the predictive capability is better than random chance (50%).
+Using the AUC score, we can see that the 3 most influential variables are: int_rate, grade, sub_grade. The complete list can be find below: (EXCEL TABLE)
+
+
+
+```{r message=FALSE, warning=FALSE}
+#split the data into trn, tst subsets
+TRNFRACTION = 0.5 #or use other values
+nr<-nrow(lcdf)
+
+trnIndex<- sample(1:nr, size = round(TRNFRACTION * nr), replace=FALSE)
+lcdfTrn <- lcdf[trnIndex, ]
+lcdfTst <- lcdf[-trnIndex, ]
+
+library(pROC) #for AUC function
+
+#Consider factor variable as numbers:
+auc(response=lcdfTrn$loan_status, as.numeric(lcdfTrn$emp_length))
+
+# For the numeric variables:
+aucsNum<-sapply(lcdfTrn %>% select_if(is.numeric), auc, response=lcdfTrn$loan_status)
+
+#Or considering both numeric and factor variables:
+aucAll<- sapply(lcdfTrn %>% mutate_if(is.factor, as.numeric) %>% select_if(is.numeric), auc, response=lcdfTrn$loan_status) 
+
+# determine which variables have auc > 0.5 (have predicting capabilities)
+aucAll[aucAll>0.5]
+
+#convert to tibble, and put 0.53 threshold to see most influential variables that have an edge above random chance.
+library(broom)
+tidy(aucAll[aucAll > 0.53]) %>% view()
+
+# in sorted order
+tidy(aucAll) %>% arrange(desc(aucAll)) %>% view()
+
+```
+## Assignment 1 - Part B
+
+# Q5
+
+Develop decision tree models to predict default.(a) Split the data into training and validation sets. What proportions do you consider, why? (b) Train decision tree models (use both rpart, c50)
+[If something looks too good, it may be due to leakage – make sure you address this] What parameters do you experiment with, and what performance do you obtain (on training and validation sets)? Clearly tabulate your results and briefly describe your findings.
+How do you evaluate performance – which measure do you consider, and why? (c) Identify the best tree model. Why do you consider it best? Describe this model – in terms of complexity (size). Examine variable importance. Briefly describe how variable importance is obtained in your best model.
+
+```{r}
+
+#It can be useful to convert the target variable, loan_status to  a factor variable
+lcdf$loan_status <- factor(lcdf$loan_status, levels=c("Fully Paid", "Charged Off"))
+
+#split the data into trn, tst subsets
+TRNFRACTION = 0.7 #or use other values
+nr<-nrow(lcdf)
+
+trnIndex<- sample(1:nr, size = round(TRNFRACTION * nr), replace=FALSE)
+lcdfTrn <- lcdf[trnIndex, ]
+lcdfTst <- lcdf[-trnIndex, ]
+
+library(rpart)
+
+#lcDT1 <- rpart(loan_status ~., data=lcdfTrn, method="class", parms = list(split = "information"), control = rpart.control(minsplit = 30))
+
+lcDT1 <- rpart(loan_status ~., data=lcdfTrn, method="class", parms = list(split = "information"), control = rpart.control(cp=0.0001, minsplit = 20))
+
+printcp(lcDT1)
+
+#Evaluate performance
+predTrn=predict(lcDT1,lcdfTrn, type='class')
+table(pred = predTrn, true=lcdfTrn$loan_status)
+mean(predTrn == lcdfTrn$loan_status)
+table(pred = predict(lcDT1,lcdfTst, type='class'), true=lcdfTst$loan_status)
+mean(predict(lcDT1,lcdfTst, type='class') ==lcdfTst$loan_status)
+
+
+```
+
+
+```{r}
+printcp(lcDT1)
+plotcp(lcDT1)
+print(lcDT1)
+#summary(lcDT1)
+rpart.plot::prp(lcDT1, type=2, extra=1)
+
+```
+
+
+```{r}
+library(C50)
+#build a tree model
+
+c5_DT1 <- C5.0(loan_status ~ ., data=lcdfTrn, control=C5.0Control(minCases=5))
+
+#model details
+summary(c5_DT1)
+plot(c5_DT1)
+
+predTrnC5=predict(c5_DT1,lcdfTrn, type='class')
+table(pred = predTrnC5, true=lcdfTrn$loan_status)
+mean(predTrnC5 == lcdfTrn$loan_status)
+table(pred = predict(c5_DT1,lcdfTst, type='class'), true=lcdfTst$loan_status)
+mean(predict(c5_DT1,lcdfTst, type='class') ==lcdfTst$loan_status)
+
+```
+
+6. Develop a random forest model. (Note the ‘ranger’ library can give faster computations) What parameters do you experiment with, and does this affect performance? Describe the best model in terms of number of trees, performance, variable importance. Compare the random forest and best decision tree model from Q 4 above. Do you find the
+importance of variables to be different? Which model would you prefer, and why? For evaluation of models, you should include confusion matrix related measures, as well as ROC analyses and lifts. Explain which performance measures you focus on, and why.
+
+```{r}
+library(ranger)
+
+rgModel1 <- ranger(loan_status ~., data=lcdfTrn,
+num.trees =200, importance='permutation', probability = TRUE)
+
+vimpRg_1 <- ranger::importance(rgModel1)
+
+scoreTst <- predict(rgModel1,lcdfTst )
+head(scoreTst)$predictions
+
+scoreTst <- scoreTst$predictions[,"Fully Paid"]
+#create a confusion matrix for ranger
+
+```
+
